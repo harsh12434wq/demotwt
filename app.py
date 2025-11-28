@@ -7,6 +7,21 @@ import warnings
 from datetime import datetime
 from typing import List, Optional
 from PIL import Image
+import extra_streamlit_components as stx
+from datetime import datetime, timedelta
+import base64
+
+def get_image_base64(path):
+    """Converts an image file to a base64 string for HTML rendering"""
+    try:
+        with open(path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode('utf-8')
+    except:
+        return None
+
+# Add this helper function near your other functions
+def get_manager():
+    return stx.CookieManager()
 
 # --- PYSUI IMPORTS (BLOCKCHAIN LAYER) ---
 # Suppress deprecation warnings for a cleaner UI
@@ -116,7 +131,19 @@ def send_sui_payment(sender_priv_key: str, recipient_addr: str, amount_sui: floa
             return False, result.result_string
     except Exception as e:
         return False, str(e)
+    
+import requests
 
+def get_sui_market_data():
+    """Fetches real-time price and 24h change"""
+    try:
+        # CoinGecko API (Free, no key needed)
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=sui&vs_currencies=usd&include_24h_change=true"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        return data['sui']['usd'], data['sui']['usd_24h_change']
+    except:
+        return 1.56, 2.22 # Fallback values if API fails
 # -----------------------
 # Utility & Standard Functions
 # -----------------------
@@ -147,6 +174,27 @@ def create_user(username: str, display_name: str, password: str, bio: str = "", 
         return c.lastrowid
     except sqlite3.IntegrityError:
         return None
+
+
+def update_user_details(user_id: int, display_name: str, bio: str, new_pic_path: Optional[str] = None):
+    conn = get_conn()
+    c = conn.cursor()
+    
+    # If a new picture was uploaded, update that too. Otherwise, just update text.
+    if new_pic_path:
+        c.execute("UPDATE users SET display_name = ?, bio = ?, profile_pic_path = ? WHERE id = ?", 
+                  (display_name, bio, new_pic_path, user_id))
+    else:
+        c.execute("UPDATE users SET display_name = ?, bio = ? WHERE id = ?", 
+                  (display_name, bio, user_id))
+    
+    conn.commit()
+    
+    # Return the updated user object so we can refresh the session immediately
+    return get_user_by_id(user_id)
+
+
+
 
 def authenticate(username: str, password: str) -> Optional[dict]:
     c = get_conn().cursor()
@@ -393,16 +441,20 @@ def render_user_list(title: str, users: List[sqlite3.Row]):
                 st.rerun()
 
 # --- RENDER POST (NO RETWEET, UNIQUE KEYS, STYLING) ---
+
+# --- RENDER POST (CORRECTED IMAGE SIZING) ---
+# --- RENDER POST (UPDATED) ---
+# --- RENDER POST (WARNING FIXED) ---
+# --- RENDER POST (FORCED FULL WIDTH HTML) ---
 def render_post(p, key_prefix: str = "default"):
-    # FIX: Convert sqlite3.Row to a standard dict so .get() works
+    # Fix: Convert to dict to ensure .get() works
     p = dict(p)
     
     st.write("\n")
-    # "border=True" creates the container, but our CSS below forces the styling
     with st.container(border=True):
         header_cols = st.columns([1, 5, 1])
         
-        # --- Profile Pic Handling ---
+        # --- Profile Pic ---
         with header_cols[0]:
             if p.get('profile_pic_path') and os.path.exists(p['profile_pic_path']):
                 st.image(p['profile_pic_path'], width=50)
@@ -415,7 +467,7 @@ def render_post(p, key_prefix: str = "default"):
         created = human_time(p['created_at'])
         header_cols[1].markdown(f"**@{username}** — *{display_name}* \n<div style='font-size: 0.8em; color: gray;'>{created}</div>", unsafe_allow_html=True)
         
-        # --- View Profile Button ---
+        # --- View Profile ---
         if header_cols[2].button("View profile", key=f"{key_prefix}_view_profile:{p['id']}"):
             st.session_state.view = f"profile:{username}"
             st.rerun()
@@ -426,31 +478,30 @@ def render_post(p, key_prefix: str = "default"):
         if p.get('text'):
             st.markdown(p['text'])
         
-        # --- Post Image ---
+        # --- Post Image (NUCLEAR FIX: HTML INJECTION) ---
         if p.get('image_path'):
             abs_path = os.path.abspath(p['image_path'])
             if os.path.exists(abs_path):
-                file_size = os.path.getsize(abs_path)
-                if file_size > 0:
-                    try:
-                        img_data = Image.open(abs_path)
-                        st.write("") 
-                        st.image(img_data, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error loading image: {e}")
+                # Convert to Base64 to force HTML rendering
+                b64_str = get_image_base64(abs_path)
+                if b64_str:
+                    # We inject a raw HTML image tag with width=100% forced style
+                    html = f"""
+                        <div style="width: 100%; margin-top: 10px; border-radius: 12px; overflow: hidden;">
+                            <img src="data:image/png;base64,{b64_str}" 
+                                 style="width: 100%; height: auto; display: block; object-fit: cover; border-radius: 12px;">
+                        </div>
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
                 else:
-                    st.error(f"⚠️ Image file is empty (0 bytes). Upload failed.")
-                    st.caption(f"Path: {abs_path}")
-            else:
-                st.warning(f"⚠️ File not found at path: {p['image_path']}")
+                    st.error("Error loading image content")
 
-        # --- Action Buttons (NO RETWEET) ---
+        # --- Action Buttons ---
         st.write("") 
         row = st.columns([1,1,1]) 
         post_id = p['id']
         user = st.session_state.user
         
-        # Check interactions
         liked = False
         bookmarked = False
         if user:
@@ -479,7 +530,7 @@ def render_post(p, key_prefix: str = "default"):
             row[1].write("💬")
             row[2].write("🔖")
             
-        # --- Replies Section ---
+        # --- Replies ---
         if key_prefix != "reply_ctx":
             replies = get_replies_for_post(post_id)
             if replies:
@@ -487,13 +538,39 @@ def render_post(p, key_prefix: str = "default"):
                     for r in replies:
                         st.markdown(f"**@{r['username']}** {human_time(r['created_at'])}")
                         st.write(r['text'])
-
 # -----------------------
 # Streamlit UI (Application Layer)
 # -----------------------
+# --- REAL-TIME CHAT FRAGMENT ---
+# This decorator causes ONLY this function to rerun every 2 seconds
+@st.fragment(run_every=2)
+def render_realtime_chat(current_user_id, other_user_id, current_user_name, other_user_name):
+    # Fetch latest messages
+    msgs = get_messages_between(current_user_id, other_user_id)
+    
+    # Create the container
+    with st.container(height=300, border=True):
+        if not msgs:
+            st.caption("No messages yet. Say hi! 👋")
+            
+        for m in msgs:
+            # Determine alignment and style
+            is_me = (m['sender_id'] == current_user_id)
+            who = "You" if is_me else other_user_name # Use passed name to avoid extra DB lookup
+            style = "color: #1d9bf0;" if is_me else "color: #536471;"
+            align = "text-align: right;" if is_me else "text-align: left;"
+            
+            # Render exact HTML style as before
+            st.markdown(
+                f"<div style='{align} {style}'>"
+                f"<b>{who}</b> <span style='font-size:0.8em'>({human_time(m['created_at'])})</span>"
+                f"<br>{m['text']}</div>", 
+                unsafe_allow_html=True
+            )
 
 init_db()
 st.set_page_config(page_title="Mini Twitter (Web3 Integrated)", layout="wide")
+
 
 # =========================================================
 # CSS THEME (Force Light Mode & Fix Visibility Issues)
@@ -501,200 +578,142 @@ st.set_page_config(page_title="Mini Twitter (Web3 Integrated)", layout="wide")
 st.markdown(
     """
     <style>
-    /* 1. GLOBAL THEME OVERRIDES (Force Light Mode) */
+    /* =========================================
+       1. PITCH BLACK THEME (OLED STYLE)
+       ========================================= */
     :root {
         --primary-color: #1d9bf0;
-        --background-color: #f0f8ff;
-        --secondary-background-color: #ffffff;
-        --text-color: #000000;
-        --font: "Segoe UI", sans-serif;
-    }
-
-    /* Main Background */
-    .stApp { 
-        background-color: #f0f8ff !important;
-        background-image: linear-gradient(180deg, #e0f2fe 0%, #ffffff 100%);
+        --background-color: #000000;
+        --secondary-background-color: #000000; /* Sidebar is now Pitch Black too */
+        --text-color: #e7e9ea;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     
-    /* Remove Black Header */
-    header[data-testid="stHeader"] { background-color: transparent !important; }
-
-    /* Force Sidebar White */
+    /* Force App & Sidebar to be Pure Black */
+    .stApp, section[data-testid="stSidebar"] { 
+        background-color: #000000 !important;
+    }
+    
+    /* Remove the default Sidebar border to match Twitter's clean look */
     section[data-testid="stSidebar"] {
-        background-color: #ffffff !important;
-        border-right: 1px solid #cfd9de;
+        border-right: 1px solid #2f3336; /* Subtle border only */
     }
     
     /* =========================================
-       2. BUTTON STYLING (FIX: SIDEBAR VS PRIMARY)
+       2. SIDEBAR BUTTONS (SHARP & CLEAN)
        ========================================= */
-    
-    /* Default Buttons (Navigation) - Transparent with Hover */
-    .stButton > button {
+    section[data-testid="stSidebar"] .stButton > button {
         background-color: transparent !important;
-        color: #0f1419 !important;
-        border: 1px solid transparent !important;
-        border-radius: 25px !important;
+        border: none !important;
+        color: #e7e9ea !important;
         text-align: left !important;
-        font-weight: 600 !important;
-        font-size: 18px !important;
-        padding-left: 15px !important;
-    }
-    
-    /* Hover Effect for Nav Buttons */
-    .stButton > button:hover {
-        background-color: #e7e7e8 !important;
-        color: #000000 !important;
-        border: 1px solid #cfd9de !important;
+        font-size: 20px !important; 
+        font-weight: 700 !important;
+        letter-spacing: 0.5px !important;
+        padding: 10px 15px !important;
+        margin-bottom: 4px !important;
+        border-radius: 30px !important;
+        transition: background-color 0.2s ease;
+        
+        /* Make icons sharp white */
+        filter: grayscale(100%) brightness(200%) contrast(150%);
     }
 
-    /* Primary Buttons (Tweet, Follow, Post) - Solid Blue */
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background-color: #181919 !important; /* Very dark grey hover */
+    }
+
+    /* =========================================
+       3. TWEET BUTTON (BIG BLUE PILL)
+       ========================================= */
     button[kind="primary"] {
         background-color: #1d9bf0 !important;
-        color: white !important;
         border: none !important;
-        font-weight: bold !important;
-        box-shadow: 0 2px 5px rgba(29, 155, 240, 0.3) !important;
+        color: white !important;
+        font-weight: 800 !important;
+        font-size: 17px !important;
+        border-radius: 30px !important;
+        height: 50px !important;
+        margin-top: 10px !important;
+        box-shadow: 0 5px 15px rgba(29, 155, 240, 0.2) !important;
+        filter: none !important; 
     }
     button[kind="primary"]:hover {
         background-color: #1a8cd8 !important;
     }
-    
-    /* FIX: FORM SUBMIT BUTTONS (Send Transaction) */
-    /* Ensure form buttons are Blue, not black */
-    div[data-testid="stForm"] button {
-         background-color: #1d9bf0 !important;
-         color: white !important;
-         border: none !important;
-         font-weight: bold !important;
-    }
-    
-    /* FIX: Trigger Button for Popovers (Send SUI) */
-    div[data-testid="stPopover"] button {
-         background-color: #1d9bf0 !important;
-         color: white !important;
-         border: none !important;
-         font-weight: bold !important;
-    }
-
-    /* Small Action Buttons (Like, Reply inside posts) - Keep them subtle */
-    div[data-testid="stVerticalBlockBorderWrapper"] button {
-         background-color: transparent !important;
-         color: #536471 !important;
-         border: 1px solid #cfd9de !important;
-         font-size: 14px !important;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] button:hover {
-         background-color: #e7f5fd !important;
-         color: #1d9bf0 !important;
-         border: 1px solid #1d9bf0 !important;
-    }
 
     /* =========================================
-       3. INPUTS & TEXT VISIBILITY
+       4. POST IMAGES (FULL WIDTH & ROUNDED)
        ========================================= */
-    
-    input, textarea, select {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-        caret-color: #000000 !important;
-        border: 1px solid #cfd9de !important;
-        border-radius: 10px !important;
+    .post-img {
+        width: 100% !important;
+        display: block !important;
+        margin-top: 10px !important;
+    }
+    .post-img img {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        object-fit: cover !important;
+        border-radius: 16px !important;
+        border: 1px solid #2f3336 !important;
     }
     
     /* =========================================
-       4. FIX BLACK BOXES (POPOVER, EXPANDER) -- AGGRESSIVE FIX
+       5. CIRCULAR PROFILE PICTURES
        ========================================= */
-       
-    /* Force Popover Body and ALL nested containers to be white */
-    div[data-testid="stPopoverBody"], 
-    div[data-testid="stPopoverBody"] > div,
-    div[data-testid="stPopoverBody"] > div > div {
-        background-color: #ffffff !important;
-        color: #000000 !important;
+    div[data-testid="stColumn"] div[data-testid="stImage"] img {
+        border-radius: 50% !important;
+        aspect-ratio: 1 / 1 !important;
+        object-fit: cover !important;
     }
 
-    /* Target the inputs inside the popover */
-    div[data-testid="stPopoverBody"] input {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        border: 1px solid #ccc !important;
-    }
-    
-    /* Fix the plus/minus buttons on number input inside popover */
-    div[data-testid="stPopoverBody"] button {
-         background-color: #f0f8ff !important; 
-         color: #000000 !important;
-         border: 1px solid #cfd9de !important;
-    }
-
-    /* ----------------- NEW FIX FOR EXPANDERS (BROADER SELECTORS) ----------------- */
-    /* Target the DETAILS and SUMMARY tags specifically */
-    div[data-testid="stExpander"] details {
-        background-color: #f7f9f9 !important;
-        color: #0f1419 !important;
-        border-color: #cfd9de !important;
-        border-radius: 10px !important;
-    }
-
-    div[data-testid="stExpander"] details > summary {
-        background-color: #f7f9f9 !important;
-        color: #0f1419 !important;
-        border-radius: 10px !important;
-    }
-    
-    /* Force SVG Icon (Chevron) to be black */
-    div[data-testid="stExpander"] details > summary svg {
-        fill: #0f1419 !important;
-        color: #0f1419 !important;
-    }
-    
-    /* Hover State */
-    div[data-testid="stExpander"] details > summary:hover {
-        background-color: #eff3f4 !important;
-        color: #0f1419 !important;
-    }
-    
-    /* Content Inside Expander */
-    div[data-testid="stExpanderDetails"] {
-        background-color: #ffffff !important;
-        color: #0f1419 !important;
-    }
-    div[data-testid="stExpanderDetails"] * {
-        color: #0f1419 !important;
-    }
-    
     /* =========================================
-       5. OTHER FIXES
+       6. UI CLEANUP & BORDERS
        ========================================= */
+    /* Hide Header */
+    header[data-testid="stHeader"] { visibility: hidden !important; }
+    .block-container { padding-top: 1rem !important; }
     
-    h1, h2, h3, h4, h5, h6, p, li, span, div, label {
-        color: #000000;
+    /* Make Input Boxes Pitch Black to match background */
+    input, textarea, select, div[data-baseweb="select"] > div {
+        background-color: #000000 !important;
+        color: white !important;
+        border: 1px solid #2f3336 !important;
     }
     
-    div[data-testid="stImage"] img {
-        border-radius: 15px;
+    /* Post Borders - Twitter uses a very specific dark grey */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #000000 !important; /* Ensure card background is black */
+        border-color: #2f3336 !important;
+        border-radius: 0px !important; /* Twitter posts are usually squarer, but 0 or 16 is fine */
+        border-left: none !important;
+        border-right: none !important;
+        border-top: none !important;
+        border-bottom: 1px solid #2f3336 !important; /* Only bottom border like real feed */
     }
-    
-    .wallet-card-container {
-        background-color: #ffffff;
-        border: 1px solid #cfd9de;
-        border-radius: 20px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-    }
-    .coin-name, .coin-holdings-value { color: #0f1419 !important; }
-    
-    .block-container { padding-top: 2rem; }
-    
     </style>
     """, unsafe_allow_html=True
 )
 
+# --- COOKIE MANAGER SETUP ---
+# --- COOKIE MANAGER SETUP ---
+# --- COOKIE MANAGER SETUP ---
+cookie_manager = get_manager() 
+cookie_user_id = cookie_manager.get(cookie="current_user_id")
+
+# 1. INITIALIZE "user" FIRST (This prevents the error)
 if "user" not in st.session_state:
     st.session_state.user = None
+
+# 2. AUTO-LOGIN CHECK (Safe to run now because "user" exists)
+if not st.session_state.user and cookie_user_id:
+    user_data = get_user_by_id(int(cookie_user_id))
+    if user_data:
+        st.session_state.user = user_data
+        # Set auth_mode to home so it skips the login screen
+        if "auth_mode" not in st.session_state:
+            st.session_state.auth_mode = "home"
 
 # ==========================================
 # AUTH SCREEN
@@ -723,6 +742,8 @@ if not st.session_state.user:
                         row = authenticate(username.strip(), password)
                         if row:
                             st.session_state.user = row
+                            # SAVE COOKIE: Expires in 7 days
+                            cookie_manager.set("current_user_id", row['id'], expires_at=datetime.now() + timedelta(days=7))
                             st.toast("Welcome back!", icon="👋")
                             time.sleep(0.5)
                             st.rerun()
@@ -779,57 +800,57 @@ if not st.session_state.user:
 # Initialize view state
 if "view" not in st.session_state: st.session_state.view = "home"
 
+# --- SIDEBAR NAVIGATION ---
+# --- SIDEBAR NAVIGATION (TWITTER STYLE) ---
 with st.sidebar:
-    # --- Logo ---
-    st.markdown("<h1 style='text-align: center; color: #1d9bf0;'>🐦</h1>", unsafe_allow_html=True)
+    # 1. The X Logo (Centered, correct size)
+    st.markdown("<h1 style='text-align: center; color: white; font-size: 45px; margin-top: -20px; margin-bottom: 10px;'>𝕏</h1>", unsafe_allow_html=True)
     
-    # --- Navigation Buttons ---
-    # We use st.button with full width. CSS makes them look like links (transparent)
-    if st.button("🏠  Home", use_container_width=True): 
-        st.session_state.view = "home"
-        st.rerun()
+    # 2. Buttons - Note the DOUBLE SPACE "  " after the emoji for better separation
+    if st.button("🏠   Home", use_container_width=True): 
+        st.session_state.view = "home"; st.rerun()
         
-    if st.button("🔍  Explore", use_container_width=True): 
-        st.session_state.view = "explore"
-        st.rerun()
+    if st.button("🔍   Explore", use_container_width=True): 
+        st.session_state.view = "explore"; st.rerun()
         
-    if st.button("🔔  Notifications", use_container_width=True): 
-        st.session_state.view = "notifications"
-        st.rerun()
+    if st.button("🔔   Notifications", use_container_width=True): 
+        st.session_state.view = "notifications"; st.rerun()
         
-    if st.button("📩  Messages", use_container_width=True): 
-        st.session_state.view = "messages"
-        st.rerun()
+    if st.button("✉️   Messages", use_container_width=True): 
+        st.session_state.view = "messages"; st.rerun()
         
-    if st.button("🔖  Bookmarks", use_container_width=True): 
-        st.session_state.view = "bookmarks"
-        st.rerun()
+    if st.button("🔖   Bookmarks", use_container_width=True): 
+        st.session_state.view = "bookmarks"; st.rerun()
         
-    if st.button("💳  Wallet", use_container_width=True): 
-        st.session_state.view = "wallet"
-        st.rerun()
+    if st.button("💳   Wallet", use_container_width=True): 
+        st.session_state.view = "wallet"; st.rerun()
         
+    if st.button("👤   Profile", use_container_width=True): 
+        st.session_state.view = f"profile:{st.session_state.user['username']}"; st.rerun()
+
     st.write("") # Spacer
 
-    # --- Tweet Button (Primary Color) ---
-    if st.button("✒️ Tweet", type="primary", use_container_width=True): 
-        st.session_state.view = "create_post"
-        st.rerun()
+    # 3. Tweet Button (Big Blue)
+    if st.button("Tweet", type="primary", use_container_width=True): 
+        st.session_state.view = "create_post"; st.rerun()
 
     st.divider()
 
-    # --- User Profile Section at Bottom ---
+    # 4. Profile Pill at Bottom
     usr = st.session_state.user
-    usr = get_user_by_id(usr['id']) 
-    st.session_state.user = usr
-
-    col_p1, col_p2 = st.columns([1, 3])
-    with col_p1:
-        if usr.get('profile_pic_path'): st.image(usr['profile_pic_path'], width=40)
-        else: st.write("👤")
-    with col_p2:
-        st.markdown(f"**{usr.get('display_name')}**")
-        st.caption(f"@{usr.get('username')}")
+    if usr:
+        usr = get_user_by_id(usr['id']) 
+        st.session_state.user = usr
+        
+        # Using a container for better layout control
+        with st.container():
+            col_p1, col_p2 = st.columns([1, 3])
+            with col_p1:
+                if usr.get('profile_pic_path'): st.image(usr['profile_pic_path'], width=40)
+                else: st.write("👤")
+            with col_p2:
+                # Tighter line height for the text
+                st.markdown(f"<div style='line-height: 1.1; margin-top: 2px;'><b>{usr.get('display_name')}</b><br><span style='color: gray; font-size: 0.9em;'>@{usr.get('username')}</span></div>", unsafe_allow_html=True)
 
     # Wallet Address Box (FIXED: Replaced st.code with Custom HTML Div)
     addr = usr.get("wallet_address", "No Wallet")
@@ -852,6 +873,8 @@ with st.sidebar:
 
     st.write("")
     if st.button("🚪 Sign Out", use_container_width=True):
+        # DELETE COOKIE
+        cookie_manager.delete("current_user_id")
         st.session_state.user = None
         st.rerun()
 
@@ -893,6 +916,64 @@ elif st.session_state.view.startswith("reply:"):
                 st.success("Replied")
                 st.session_state.view = "home"
                 st.rerun()
+
+elif st.session_state.view == "edit_profile":
+    st.header("Edit Profile")
+    curr = st.session_state.user
+    
+    with st.container(border=True):
+        with st.form("edit_profile_form"):
+            # Display Name
+            new_name = st.text_input("Display Name", value=curr['display_name'])
+            
+            # Bio
+            new_bio = st.text_area("Bio", value=curr['bio'] if curr['bio'] else "", max_chars=160)
+            
+            # Profile Picture
+            st.write("Profile Picture")
+            col_preview, col_upload = st.columns([1, 3])
+            
+            with col_preview:
+                # Show current pic preview
+                if curr.get('profile_pic_path') and os.path.exists(curr['profile_pic_path']):
+                    st.image(curr['profile_pic_path'], width=80)
+                else:
+                    st.markdown("👤")
+            
+            with col_upload:
+                new_pic = st.file_uploader("Upload new image", type=["png", "jpg", "jpeg"])
+
+            st.write("")
+            submitted = st.form_submit_button("Save Changes", type="primary")
+
+            if submitted:
+                if not new_name.strip():
+                    st.error("Display Name cannot be empty")
+                else:
+                    final_path = None
+                    # Handle Image Upload
+                    if new_pic:
+                        fname = f"updated_{curr['id']}_{int(time.time())}_{new_pic.name}"
+                        path = os.path.join(PROFILE_PIC_DIR, fname)
+                        with open(path, "wb") as f:
+                            f.write(new_pic.getbuffer())
+                        final_path = path
+                    
+                    # Update Database
+                    updated_user = update_user_details(curr['id'], new_name.strip(), new_bio.strip(), final_path)
+                    
+                    # Update Session State
+                    st.session_state.user = updated_user
+                    
+                    st.success("Profile updated successfully!")
+                    time.sleep(1)
+                    # Redirect back to profile
+                    st.session_state.view = f"profile:{curr['username']}"
+                    st.rerun()
+
+    if st.button("Cancel"):
+        st.session_state.view = f"profile:{curr['username']}"
+        st.rerun()
 
 elif st.session_state.view == "home":
     st.header("Home")
@@ -936,67 +1017,77 @@ elif st.session_state.view == "notifications":
 elif st.session_state.view == "messages":
     st.header("Direct Messages")
     user = st.session_state.user
+    
+    # 1. Select User Logic
     rows = get_conn().cursor().execute("SELECT username FROM users WHERE id != ?", (user['id'],)).fetchall()
     options = [r['username'] for r in rows]
     other = st.selectbox("Select user to message", options=options)
+    
     if other:
         other_row = get_user_by_username(other)
         st.subheader(f"Chat with @{other_row['username']}")
-        msgs = get_messages_between(user['id'], other_row['id'])
-        msg_container = st.container(height=300, border=True)
-        for m in msgs:
-            who = "You" if m['sender_id'] == user['id'] else m['sender_name']
-            style = "color: #1d9bf0;" if m['sender_id'] == user['id'] else "color: #536471;"
-            align = "text-align: right;" if m['sender_id'] == user['id'] else "text-align: left;"
-            msg_container.markdown(f"<div style='{align} {style}'><b>{who}</b> <span style='font-size:0.8em'>({human_time(m['created_at'])})</span><br>{m['text']}</div>", unsafe_allow_html=True)
-        with st.form("send_msg"):
+        
+        # 2. CALL THE REAL-TIME FRAGMENT
+        # This function will now self-refresh every 2 seconds independently of the rest of the page
+        render_realtime_chat(user['id'], other_row['id'], user['username'], other_row['username'])
+        
+        # 3. Input Form (Outside the fragment so typing isn't interrupted)
+        with st.form("send_msg", clear_on_submit=True):
             txt = st.text_area("Message")
             ok = st.form_submit_button("Send")
-            if ok:
+            if ok and txt.strip():
                 send_message(user['id'], other_row['id'], txt)
-                st.success("Sent")
-                st.rerun()
-
+                # No need to rerun everything, the fragment will pick it up in <2 seconds
+                st.toast("Message sent!")
 # --- WALLET VIEW (REDESIGNED) ---
+
+# --- WALLET VIEW (REAL-TIME DATA) ---
+
 elif st.session_state.view == "wallet":
     curr = st.session_state.user
-    # 1. Fetch Balance
+    
+    # 1. Fetch Balance & Market Data
     with st.spinner("Syncing with Blockchain..."):
         balance = get_sui_balance(curr['wallet_address'])
+        sui_price, price_change_pct = get_sui_market_data()
 
-    # Placeholder price data
-    sui_price = 1.53
-    price_change_pct = 1.39
+    # Calculate Holdings
     holdings_value = balance * sui_price
 
-    # Header
-    col_h1, col_h2 = st.columns([8, 1])
-    with col_h1: st.markdown("<h1>Your Coins</h1>", unsafe_allow_html=True)
-    with col_h2: st.markdown("<div style='text-align:right; font-size:1.5em; padding-top: 10px;'>🔍</div>", unsafe_allow_html=True)
+    # Determine Colors
+    change_color = "#00ba7c" if price_change_pct >= 0 else "#f91880"
+    change_sign = "+" if price_change_pct >= 0 else ""
 
-    # Wallet Card
-    st.markdown("""
-        <div class="wallet-card-container">
-            <div class="coin-row">
-                <div class="coin-left">
-                    <div class="coin-icon">💧</div>
-                    <div>
-                        <div class="coin-name">Sui <span style="color:#1d9bf0;">☑️</span></div>
-                        <div class="coin-price-details">
-                            ${:.2f} <span class="change-green">+{:.2f}%</span>
-                        </div>
-                    </div>
+    # --- HEADER ---
+    col_h1, col_h2 = st.columns([8, 1])
+    with col_h1: 
+        st.markdown("<h1 style='margin-bottom: 20px;'>Your Coins</h1>", unsafe_allow_html=True)
+    with col_h2: 
+        st.markdown("""<div style="background-color: #eff3f4; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-top: 10px; cursor: pointer;"><span style="font-size: 1.2em;">🔍</span></div>""", unsafe_allow_html=True)
+
+    # --- WALLET CARD (NO INDENTATION TO PREVENT BLACK BOX) ---
+    st.markdown(f"""
+<div style="background-color: white; border-radius: 20px; border: 1px solid #e1e8ed; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); margin-bottom: 30px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <img src="https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png" width="48" height="48" style="border-radius: 50%;">
+            <div>
+                <div style="font-weight: 800; font-size: 19px; color: #0f1419; display: flex; align-items: center; gap: 4px;">
+                    Sui 
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/e/e4/Twitter_Verified_Badge.svg" width="18" height="18">
                 </div>
-                <div class="coin-right">
-                    <div class="coin-holdings-value">${:.2f}</div>
-                    <div class="coin-holdings-amount">{:.4f} SUI</div>
+                <div style="font-size: 15px; color: #536471; margin-top: 2px;">
+                    ${sui_price:,.2f} <span style="color: {change_color}; font-weight: 500;">{change_sign}{price_change_pct:.2f}%</span>
                 </div>
             </div>
         </div>
-    """.format(sui_price, price_change_pct, holdings_value, balance), unsafe_allow_html=True)
-
-    st.caption("Network: **Mainnet** | *Price data is placeholder*")
-    st.divider()
+        <div style="text-align: right;">
+            <div style="font-weight: 800; font-size: 19px; color: #0f1419;">${holdings_value:,.2f}</div>
+            <div style="font-size: 15px; color: #536471; margin-top: 2px;">{balance:.4f} SUI</div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
     # 2. Withdraw / Send Section
     st.subheader("📤 Withdraw Funds")
@@ -1005,8 +1096,8 @@ elif st.session_state.view == "wallet":
         dest_addr = st.text_input("Destination Address (0x...)")
         amount = st.number_input("Amount to Send", min_value=0.0, max_value=balance, step=0.1)
         
-        # Note: The CSS below forces this button to be blue
-        if st.form_submit_button("Send Transaction"):
+        # Fixed warning: changed use_container_width=True to width="stretch"
+        if st.form_submit_button("Send Transaction", width="stretch"):
             if amount <= 0:
                 st.error("Amount must be positive.")
             elif not dest_addr.startswith("0x"):
@@ -1031,16 +1122,25 @@ elif st.session_state.view == "wallet":
 elif st.session_state.view.startswith("profile:"):
     _, uname = st.session_state.view.split(":")
     u_row = get_user_by_username(uname)
-    if not u_row: st.error("User not found")
+    
+    if not u_row:
+        st.error("User not found")
     else:
         u = dict(u_row)
         user_id = u['id']
         is_me = (st.session_state.user['id'] == user_id)
 
-        # 1. THE BANNER (Placeholder)
+        # 1. THE BANNER AREA
+        # FIX: Changed background-color to 'transparent' so the grey box is GONE.
+        # It only takes up space layout-wise so the profile pic sits correctly.
         st.markdown(
             """
-            <div style="background-color: #cfd9de; height: 150px; width: 100%; margin-bottom: -50px;"></div>
+            <div style="
+                background-color: transparent; 
+                height: 120px; 
+                width: 100%; 
+                margin-bottom: -60px;
+            "></div>
             """, 
             unsafe_allow_html=True
         )
@@ -1049,6 +1149,7 @@ elif st.session_state.view.startswith("profile:"):
         header_cols = st.columns([1, 2, 1])
         
         with header_cols[0]:
+            # Profile Picture Container
             st.markdown('<div class="profile-pic">', unsafe_allow_html=True)
             if u.get('profile_pic_path'): 
                 if os.path.exists(u['profile_pic_path']):
@@ -1083,22 +1184,24 @@ elif st.session_state.view.startswith("profile:"):
                             follow_user(st.session_state.user['id'], user_id)
                             st.rerun()
             else:
-                if st.button("Edit Profile", key="edit_profile"):
-                    st.toast("Edit profile coming soon!")
+                # Edit Profile Button
+                if st.button("Edit Profile", key="edit_profile_btn"):
+                    st.session_state.view = "edit_profile"
+                    st.rerun()
 
         # 3. USER INFO
         st.markdown(f"""
         <div style="margin-top: 10px;">
-            <div style="font-size: 1.5rem; font-weight: 800; line-height: 1.2; color: #0f1419;">{u['display_name']}</div>
-            <div style="color: #536471; font-size: 1rem;">@{u['username']}</div>
+            <div style="font-size: 1.5rem; font-weight: 800; line-height: 1.2; color: white;">{u['display_name']}</div>
+            <div style="color: #71767b; font-size: 1rem;">@{u['username']}</div>
         </div>
         """, unsafe_allow_html=True)
         
         if u.get('bio'):
-            st.markdown(f"<div style='margin-top: 10px; font-size: 1rem; color: #0f1419;'>{u['bio']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='margin-top: 10px; font-size: 1rem; color: #e7e9ea;'>{u['bio']}</div>", unsafe_allow_html=True)
             
         st.markdown(f"""
-        <div style="color: #536471; font-size: 0.9rem; margin-top: 10px; display: flex; align-items: center;">
+        <div style="color: #71767b; font-size: 0.9rem; margin-top: 10px; display: flex; align-items: center;">
             📅 Joined {human_time(u.get('created_at')).split(' ')[0]}
         </div>
         """, unsafe_allow_html=True)
@@ -1122,7 +1225,7 @@ elif st.session_state.view.startswith("profile:"):
                 st.session_state.view = f"followers_list:{user_id}:{uname}"
                 st.rerun()
 
-        # 5. TABS FOR POSTS
+        # 5. TABS
         st.write("")
         st.write("")
         tab_posts, tab_replies, tab_likes = st.tabs(["Posts", "Replies", "Likes"])
@@ -1133,7 +1236,6 @@ elif st.session_state.view.startswith("profile:"):
             for p in user_posts: render_post(p, "prof_posts")
             
         with tab_replies:
-            # --- NEW: SHOW FULL ORIGINAL POST IN REPLY ---
             replies_list = get_replies_for_user(user_id)
             if not replies_list: st.info("No replies yet.")
             for r in replies_list:
@@ -1143,11 +1245,7 @@ elif st.session_state.view.startswith("profile:"):
                     with col_txt:
                         st.caption(f"Replying to @{r['orig_username']}")
                         st.markdown(f"**{r['reply_text']}**")
-                        
-                        # Use an Expander to show the "Full Context" of the original post
-                        with st.expander("Original Post Context", expanded=True):
-                            # Construct a fake "post row" dict using the data we fetched
-                            # This allows us to re-use the powerful render_post function!
+                        with st.expander("Original Post Context"):
                             fake_post_row = {
                                 "id": r["orig_post_id"],
                                 "username": r["orig_username"],
