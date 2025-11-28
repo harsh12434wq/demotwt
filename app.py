@@ -727,8 +727,17 @@ with st.sidebar:
     st.markdown(f"<div style='background-color: #e7f5fd; color: #1d9bf0; padding: 8px; border-radius: 5px; font-family: monospace; text-align: center; font-size: 0.9em; border: 1px solid #1d9bf0; margin-top: 5px;'>{short_addr}</div>", unsafe_allow_html=True)
     st.write("")
     if st.button("🚪 Sign Out", use_container_width=True):
-        cookie_manager.delete("current_user_id")
+        # 1. Clear State
         st.session_state.user = None
+        st.session_state.auth_mode = "login"
+        st.session_state.view = "home"
+        
+        # 2. Delete Cookie
+        cookie_manager.delete("current_user_id")
+        
+        # 3. CRITICAL: Wait for browser to actually delete it
+        # This prevents the "Sticky Login" issue
+        time.sleep(1) 
         st.rerun()
 
 # --- VIEW HANDLERS ---
