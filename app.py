@@ -705,8 +705,43 @@ st.markdown(
 # --- COOKIE MANAGER SETUP ---
 # --- COOKIE MANAGER SETUP ---
 # --- COOKIE MANAGER SETUP ---
-cookie_manager = get_manager() 
+# --- COOKIE MANAGER SETUP (CLOUD FIX) ---
+# 1. Cache the manager so it doesn't reload on every run
+@st.cache_resource(experimental_allow_widgets=True)
+def get_manager():
+    return stx.CookieManager(key="auth_cookie_manager")
+
+cookie_manager = get_manager()
+
+# 2. FORCE SYNC DELAY (Crucial for Cloud)
+# This pauses the script for 0.5s ONLY ONCE when you first load the page.
+# It gives the browser time to find the cookie before Python asks for it.
+if "cookie_sync" not in st.session_state:
+    st.session_state.cookie_sync = False
+
+if not st.session_state.cookie_sync:
+    time.sleep(0.5) 
+    st.session_state.cookie_sync = True
+    st.rerun()
+
+# 3. Now it is safe to fetch
 cookie_user_id = cookie_manager.get(cookie="current_user_id")
+
+# 4. INITIALIZE "user" FIRST
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# 5. AUTO-LOGIN CHECK
+if not st.session_state.user and cookie_user_id:
+    try:
+        user_data = get_user_by_id(int(cookie_user_id))
+        if user_data:
+            st.session_state.user = user_data
+            if "auth_mode" not in st.session_state:
+                st.session_state.auth_mode = "home"
+    except:
+        # If cookie data is corrupted, delete it
+        cookie_manager.delete("current_user_id")
 
 # 1. INITIALIZE "user" FIRST (This prevents the error)
 if "user" not in st.session_state:
