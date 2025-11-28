@@ -559,10 +559,15 @@ def render_realtime_chat(current_user_id, other_user_id, current_user_name, othe
                 unsafe_allow_html=True
             )
 
+# Ensure DB is ready BEFORE checking cookies
 init_db()
+
 st.set_page_config(page_title="Mini Twitter (Web3 Integrated)", layout="wide")
 
 
+# =========================================================
+# CSS THEME (Force Light Mode & Fix Visibility Issues)
+# =========================================================
 # =========================================================
 # CSS THEME (Force Light Mode & Fix Visibility Issues)
 # =========================================================
@@ -644,7 +649,7 @@ st.markdown(
         --text-color: #e7e9ea;
     }
     .stApp, section[data-testid="stSidebar"] { 
-        background-color: #000000 !important;
+        background-color: #000000 !important; 
     }
     section[data-testid="stSidebar"] {
         border-right: 1px solid #2f3336;
@@ -659,29 +664,41 @@ st.markdown(
        6. UI CLEANUP (MOBILE FIXED)
        ========================================= */
     
-    /* 1. Make Header Visible but Transparent */
+    /* 1. Make Header Background Transparent */
     header[data-testid="stHeader"] {
         background: transparent !important;
-        visibility: visible !important; /* Crucial for mobile menu */
+        visibility: visible !important;
     }
-    
-    /* 2. Hide the Decoration Line & Deploy Button */
-    header[data-testid="stHeader"] > div:first-child {
-        display: none !important;
-    }
+
+    /* 2. Hide the "Deploy" button specifically */
     .stDeployButton {
         display: none !important;
     }
     
-    /* 3. FORCE THE MOBILE MENU ARROW TO BE WHITE */
+    /* 3. Hide the rainbow decoration line BUT keep the container for the menu button */
+    header[data-testid="stHeader"] > div:first-child {
+        background: transparent !important;
+    }
+    header[data-testid="stHeader"] > div:first-child > div:first-child {
+        display: none !important; /* Hides only the colorful line */
+    }
+
+    /* 4. FORCE MOBILE MENU BUTTON TO BE WHITE */
+    /* This targets the sidebar toggle button specifically */
     header[data-testid="stHeader"] button {
         color: white !important;
-    }
-    header[data-testid="stHeader"] svg {
-        fill: white !important;
+        background-color: transparent !important;
+        border: none !important;
+        z-index: 999999 !important; /* Ensure it sits on top */
     }
     
-    /* 4. Adjust spacing so content doesn't hide behind the header */
+    /* Force the SVG icon (hamburger menu) to be white */
+    header[data-testid="stHeader"] button svg {
+        fill: white !important;
+        stroke: white !important;
+    }
+
+    /* 5. Adjust spacing so content doesn't hide behind the header */
     .block-container { 
         padding-top: 3rem !important; 
     }
@@ -702,28 +719,28 @@ st.markdown(
 # This ensures that cookies work even on slow connections/Streamlit Cloud
 # -----------------------------------------------------------------------
 
-# 1. Initialize the manager
-cookie_manager = stx.CookieManager(key="auth_cookie_manager")
+# 1. Initialize the manager with a fixed key
+cookie_manager = stx.CookieManager(key="auth_mgr_v2")
 
-# 2. Force a sync check
-# stx.CookieManager.get_all() returns None if the JS component isn't mounted yet.
+# 2. Add a tiny sleep to allow the JS component to mount
+time.sleep(0.1)
+
+# 3. Retrieve all cookies
 cookies = cookie_manager.get_all()
 
-# 3. Wait for the component to load
+# 4. STRICT LOADING CHECK
 # If cookies is None, the bridge isn't built. We stop execution.
-# The component will trigger a rerun automatically once it loads in the browser.
 if cookies is None:
-    st.spinner("Loading authentication...")
     st.stop() 
 
-# 4. Fetch the specific cookie from the synced dictionary
+# 5. Fetch the specific cookie from the synced dictionary
 cookie_user_id = cookies.get("current_user_id")
 
-# 5. INITIALIZE "user" STATE
+# 6. INITIALIZE "user" STATE
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 6. AUTO-LOGIN CHECK
+# 7. AUTO-LOGIN CHECK
 if not st.session_state.user and cookie_user_id:
     try:
         user_data = get_user_by_id(int(cookie_user_id))
@@ -732,7 +749,8 @@ if not st.session_state.user and cookie_user_id:
             if "auth_mode" not in st.session_state:
                 st.session_state.auth_mode = "home"
     except Exception as e:
-        print(f"Cookie Error: {e}")
+        # DB probably reset on Cloud restart
+        # print(f"Cookie Error: {e}")
         cookie_manager.delete("current_user_id")
 
 # ==========================================
