@@ -692,6 +692,46 @@ st.markdown(
         border-top: none !important;
         border-bottom: 1px solid #2f3336 !important; /* Only bottom border like real feed */
     }
+    /* =========================================
+       8. MOBILE RESPONSIVENESS (Phone View)
+       ========================================= */
+    @media only screen and (max-width: 768px) {
+        
+        /* 1. Reduce Sidebar padding to save space */
+        section[data-testid="stSidebar"] {
+            width: 280px !important;
+        }
+        
+        /* 2. Reduce empty white space around the main content */
+        .block-container {
+            padding-top: 3rem !important; /* Less gap at the top */
+            padding-left: 1rem !important; /* Full width feel */
+            padding-right: 1rem !important;
+        }
+        
+        /* 3. Make Buttons "Thumb-Friendly" (Taller & Bigger Text) */
+        button[kind="primary"], 
+        div[data-testid="stForm"] button {
+            height: 55px !important; /* Easier to tap */
+            font-size: 20px !important;
+        }
+        
+        /* 4. Force Profile Header to Stack Vertically (No squished columns) */
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+        }
+        
+        /* 5. Fix the Wallet Card layout for small screens */
+        .wallet-card-container > div {
+            flex-direction: column !important; /* Stack items vertically */
+            align-items: flex-start !important;
+            gap: 10px !important;
+        }
+        
+        /* 6. Adjust Text Sizes for readability */
+        h1 { font-size: 28px !important; }
+        p, div, li { font-size: 16px !important; }
+    }
     </style>
     """, unsafe_allow_html=True
 )
@@ -1043,6 +1083,7 @@ elif st.session_state.view == "messages":
 
 # --- WALLET VIEW (REAL-TIME DATA) ---
 
+# --- WALLET VIEW (CLEANER HEADER) ---
 elif st.session_state.view == "wallet":
     curr = st.session_state.user
     
@@ -1058,36 +1099,33 @@ elif st.session_state.view == "wallet":
     change_color = "#00ba7c" if price_change_pct >= 0 else "#f91880"
     change_sign = "+" if price_change_pct >= 0 else ""
 
-    # --- HEADER ---
-    col_h1, col_h2 = st.columns([8, 1])
-    with col_h1: 
-        st.markdown("<h1 style='margin-bottom: 20px;'>Your Coins</h1>", unsafe_allow_html=True)
-    with col_h2: 
-        st.markdown("""<div style="background-color: #eff3f4; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-top: 10px; cursor: pointer;"><span style="font-size: 1.2em;">🔍</span></div>""", unsafe_allow_html=True)
+    # --- HEADER (REMOVED SEARCH ICON) ---
+    # Just the title now, no columns needed
+    st.markdown("<h1 style='margin-bottom: 20px;'>Your Coins</h1>", unsafe_allow_html=True)
 
-    # --- WALLET CARD (NO INDENTATION TO PREVENT BLACK BOX) ---
+    # --- WALLET CARD ---
     st.markdown(f"""
-<div style="background-color: white; border-radius: 20px; border: 1px solid #e1e8ed; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); margin-bottom: 30px;">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <img src="https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png" width="48" height="48" style="border-radius: 50%;">
-            <div>
-                <div style="font-weight: 800; font-size: 19px; color: #0f1419; display: flex; align-items: center; gap: 4px;">
-                    Sui 
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/e/e4/Twitter_Verified_Badge.svg" width="18" height="18">
-                </div>
-                <div style="font-size: 15px; color: #536471; margin-top: 2px;">
-                    ${sui_price:,.2f} <span style="color: {change_color}; font-weight: 500;">{change_sign}{price_change_pct:.2f}%</span>
+    <div style="background-color: #000000; border-radius: 20px; border: 1px solid #2f3336; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <img src="https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png" width="48" height="48" style="border-radius: 50%;">
+                <div>
+                    <div style="font-weight: 800; font-size: 19px; color: #e7e9ea; display: flex; align-items: center; gap: 4px;">
+                        Sui 
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e4/Twitter_Verified_Badge.svg" width="18" height="18">
+                    </div>
+                    <div style="font-size: 15px; color: #71767b; margin-top: 2px;">
+                        ${sui_price:,.2f} <span style="color: {change_color}; font-weight: 500;">{change_sign}{price_change_pct:.2f}%</span>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div style="text-align: right;">
-            <div style="font-weight: 800; font-size: 19px; color: #0f1419;">${holdings_value:,.2f}</div>
-            <div style="font-size: 15px; color: #536471; margin-top: 2px;">{balance:.4f} SUI</div>
+            <div style="text-align: right;">
+                <div style="font-weight: 800; font-size: 19px; color: #e7e9ea;">${holdings_value:,.2f}</div>
+                <div style="font-size: 15px; color: #71767b; margin-top: 2px;">{balance:.4f} SUI</div>
+            </div>
         </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     # 2. Withdraw / Send Section
     st.subheader("📤 Withdraw Funds")
@@ -1096,7 +1134,6 @@ elif st.session_state.view == "wallet":
         dest_addr = st.text_input("Destination Address (0x...)")
         amount = st.number_input("Amount to Send", min_value=0.0, max_value=balance, step=0.1)
         
-        # Fixed warning: changed use_container_width=True to width="stretch"
         if st.form_submit_button("Send Transaction", width="stretch"):
             if amount <= 0:
                 st.error("Amount must be positive.")
