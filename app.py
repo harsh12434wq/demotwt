@@ -665,29 +665,34 @@ st.markdown(
     }
     
     /* =========================================
-       6. UI CLEANUP (FIXED FOR MOBILE)
+       6. UI CLEANUP (MOBILE FIXED)
        ========================================= */
     
-    /* Hide the header decoration (the colorful line and "Deploy" button) */
+    /* 1. Make Header Visible but Transparent */
     header[data-testid="stHeader"] {
         background: transparent !important;
+        visibility: visible !important; /* Crucial for mobile menu */
     }
     
-    /* Hide the decoration line specifically */
+    /* 2. Hide the Decoration Line & Deploy Button */
     header[data-testid="stHeader"] > div:first-child {
         display: none !important;
     }
-    
-    /* CRITICAL FIX: Make the Mobile Sidebar Button (Arrow/Hamburger) Visible and White */
-    button[kind="header"] {
-        background-color: transparent !important;
-        color: white !important; /* Force it white so you can see it on black background */
-        font-size: 20px !important;
+    .stDeployButton {
+        display: none !important;
     }
     
-    /* Move content up */
+    /* 3. FORCE THE MOBILE MENU ARROW TO BE WHITE */
+    header[data-testid="stHeader"] button {
+        color: white !important;
+    }
+    header[data-testid="stHeader"] svg {
+        fill: white !important;
+    }
+    
+    /* 4. Adjust spacing so content doesn't hide behind the header */
     .block-container { 
-        padding-top: 1rem !important; 
+        padding-top: 3rem !important; 
     }
     
     /* Post Borders */
@@ -707,15 +712,16 @@ st.markdown(
 # --- COOKIE MANAGER SETUP ---
 # --- COOKIE MANAGER SETUP (CLOUD FIX) ---
 # 1. Cache the manager so it doesn't reload on every run
-@st.cache_resource(experimental_allow_widgets=True)
+# --- COOKIE MANAGER SETUP (CORRECTED) ---
+import time
+
+# 1. Initialize the manager (NO CACHING - fixes the TypeError)
 def get_manager():
     return stx.CookieManager(key="auth_cookie_manager")
 
 cookie_manager = get_manager()
 
-# 2. FORCE SYNC DELAY (Crucial for Cloud)
-# This pauses the script for 0.5s ONLY ONCE when you first load the page.
-# It gives the browser time to find the cookie before Python asks for it.
+# 2. FORCE SYNC DELAY (Crucial for Cloud Login Loop)
 if "cookie_sync" not in st.session_state:
     st.session_state.cookie_sync = False
 
@@ -724,37 +730,27 @@ if not st.session_state.cookie_sync:
     st.session_state.cookie_sync = True
     st.rerun()
 
-# 3. Now it is safe to fetch
+# 3. Fetch the cookie
 cookie_user_id = cookie_manager.get(cookie="current_user_id")
 
-# 4. INITIALIZE "user" FIRST
+# 4. INITIALIZE "user" STATE
 if "user" not in st.session_state:
     st.session_state.user = None
 
 # 5. AUTO-LOGIN CHECK
+# Only check if user is NOT logged in but a cookie EXISTS
 if not st.session_state.user and cookie_user_id:
     try:
         user_data = get_user_by_id(int(cookie_user_id))
         if user_data:
             st.session_state.user = user_data
+            # Bypass login screen if successful
             if "auth_mode" not in st.session_state:
                 st.session_state.auth_mode = "home"
-    except:
-        # If cookie data is corrupted, delete it
+    except Exception as e:
+        # If cookie is invalid/old, clear it to prevent loops
+        print(f"Cookie Error: {e}")
         cookie_manager.delete("current_user_id")
-
-# 1. INITIALIZE "user" FIRST (This prevents the error)
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-# 2. AUTO-LOGIN CHECK (Safe to run now because "user" exists)
-if not st.session_state.user and cookie_user_id:
-    user_data = get_user_by_id(int(cookie_user_id))
-    if user_data:
-        st.session_state.user = user_data
-        # Set auth_mode to home so it skips the login screen
-        if "auth_mode" not in st.session_state:
-            st.session_state.auth_mode = "home"
 
 # ==========================================
 # AUTH SCREEN
