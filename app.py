@@ -10,7 +10,9 @@ from PIL import Image
 import extra_streamlit_components as stx
 from datetime import datetime, timedelta
 import base64
+import requests
 
+# --- HELPER FUNCTIONS ---
 def get_image_base64(path):
     """Converts an image file to a base64 string for HTML rendering"""
     try:
@@ -19,12 +21,7 @@ def get_image_base64(path):
     except:
         return None
 
-# Add this helper function near your other functions
-def get_manager():
-    return stx.CookieManager()
-
 # --- PYSUI IMPORTS (BLOCKCHAIN LAYER) ---
-# Suppress deprecation warnings for a cleaner UI
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 from pysui import SuiConfig, SyncClient
 from pysui.sui.sui_txn import SyncTransaction
@@ -37,17 +34,14 @@ DB_PATH = "twitter_clone.db"
 UPLOAD_DIR = "uploads"
 PROFILE_PIC_DIR = os.path.join(UPLOAD_DIR, "profiles")
 POST_IMAGE_DIR = os.path.join(UPLOAD_DIR, "posts")
-
-# SUI Network Config (Mainnet)
 SUI_RPC_URL = "https://fullnode.mainnet.sui.io:443"
 
 os.makedirs(PROFILE_PIC_DIR, exist_ok=True)
 os.makedirs(POST_IMAGE_DIR, exist_ok=True)
 
 # -----------------------
-# Database Helpers (DBMS Layer)
+# Database Helpers
 # -----------------------
-
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -56,24 +50,7 @@ def get_conn():
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    
-    # Users Table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        username TEXT UNIQUE,
-        display_name TEXT,
-        password_hash TEXT,
-        bio TEXT,
-        profile_pic_path TEXT,
-        created_at REAL,
-        wallet_address TEXT,
-        private_key TEXT,
-        mnemonic TEXT
-    )
-    """)
-    
-    # Standard Social Tables
+    c.execute("""CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, display_name TEXT, password_hash TEXT, bio TEXT, profile_pic_path TEXT, created_at REAL, wallet_address TEXT, private_key TEXT, mnemonic TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY, user_id INTEGER, text TEXT, image_path TEXT, created_at REAL, orig_post_id INTEGER DEFAULT NULL, FOREIGN KEY(user_id) REFERENCES users(id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS follows (follower_id INTEGER, followed_id INTEGER, created_at REAL, PRIMARY KEY (follower_id, followed_id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS likes (user_id INTEGER, post_id INTEGER, created_at REAL, PRIMARY KEY (user_id, post_id))""")
@@ -81,27 +58,19 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS replies (id INTEGER PRIMARY KEY, post_id INTEGER, user_id INTEGER, text TEXT, created_at REAL, FOREIGN KEY(post_id) REFERENCES posts(id), FOREIGN KEY(user_id) REFERENCES users(id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, sender_id INTEGER, receiver_id INTEGER, text TEXT, created_at REAL, FOREIGN KEY(sender_id) REFERENCES users(id), FOREIGN KEY(receiver_id) REFERENCES users(id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY, user_id INTEGER, text TEXT, seen INTEGER DEFAULT 0, created_at REAL, FOREIGN KEY(user_id) REFERENCES users(id))""")
-    
     conn.commit()
     return conn
 
 # -----------------------
 # WEB3 / CRYPTO FUNCTIONS
 # -----------------------
-
 def generate_new_wallet():
-    """Generates a fresh SUI wallet (Mnemonic, Address, Private Key)"""
     mnemonic = gen_mnemonic_phrase(12)
     derivation_path = "m/44'/784'/0'/0'/0'"
-    mnem, keypair, address = recover_key_and_address(
-        SignatureScheme.ED25519,
-        mnemonic,
-        derivation_path
-    )
+    mnem, keypair, address = recover_key_and_address(SignatureScheme.ED25519, mnemonic, derivation_path)
     return str(address), keypair.serialize(), mnemonic
 
 def get_sui_balance(address: str):
-    """Fetches total SUI balance"""
     try:
         cfg = SuiConfig.user_config(prv_keys=[], rpc_url=SUI_RPC_URL)
         client = SyncClient(cfg)
@@ -110,12 +79,10 @@ def get_sui_balance(address: str):
             total_mist = sum(int(obj.balance) for obj in result.result_data.data)
             return total_mist / 1_000_000_000
         return 0.0
-    except Exception as e:
-        print(f"Error fetching balance: {e}")
+    except:
         return 0.0
 
 def send_sui_payment(sender_priv_key: str, recipient_addr: str, amount_sui: float):
-    """Sends SUI programmatically"""
     amount_mist = int(amount_sui * 1_000_000_000)
     try:
         cfg = SuiConfig.user_config(prv_keys=[sender_priv_key], rpc_url=SUI_RPC_URL)
@@ -131,23 +98,19 @@ def send_sui_payment(sender_priv_key: str, recipient_addr: str, amount_sui: floa
             return False, result.result_string
     except Exception as e:
         return False, str(e)
-    
-import requests
 
 def get_sui_market_data():
-    """Fetches real-time price and 24h change"""
     try:
-        # CoinGecko API (Free, no key needed)
         url = "https://api.coingecko.com/api/v3/simple/price?ids=sui&vs_currencies=usd&include_24h_change=true"
         response = requests.get(url, timeout=5)
         data = response.json()
         return data['sui']['usd'], data['sui']['usd_24h_change']
     except:
-        return 1.56, 2.22 # Fallback values if API fails
+        return 1.56, 2.22 
+
 # -----------------------
 # Utility & Standard Functions
 # -----------------------
-
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -175,26 +138,15 @@ def create_user(username: str, display_name: str, password: str, bio: str = "", 
     except sqlite3.IntegrityError:
         return None
 
-
 def update_user_details(user_id: int, display_name: str, bio: str, new_pic_path: Optional[str] = None):
     conn = get_conn()
     c = conn.cursor()
-    
-    # If a new picture was uploaded, update that too. Otherwise, just update text.
     if new_pic_path:
-        c.execute("UPDATE users SET display_name = ?, bio = ?, profile_pic_path = ? WHERE id = ?", 
-                  (display_name, bio, new_pic_path, user_id))
+        c.execute("UPDATE users SET display_name = ?, bio = ?, profile_pic_path = ? WHERE id = ?", (display_name, bio, new_pic_path, user_id))
     else:
-        c.execute("UPDATE users SET display_name = ?, bio = ? WHERE id = ?", 
-                  (display_name, bio, user_id))
-    
+        c.execute("UPDATE users SET display_name = ?, bio = ? WHERE id = ?", (display_name, bio, user_id))
     conn.commit()
-    
-    # Return the updated user object so we can refresh the session immediately
     return get_user_by_id(user_id)
-
-
-
 
 def authenticate(username: str, password: str) -> Optional[dict]:
     c = get_conn().cursor()
@@ -280,13 +232,6 @@ def unbookmark_post(user_id: int, post_id: int):
     c.execute("DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?", (user_id, post_id))
     conn.commit()
 
-def retweet(user_id: int, post_id: int) -> Optional[int]:
-    orig = get_post(post_id)
-    if not orig: return None
-    new_id = create_post(user_id, f"RT @{get_user_by_id(orig['user_id'])['username']}: {orig['text']}", orig_post_id=post_id)
-    create_notification(orig['user_id'], f"@{get_user_by_id(user_id)['username']} retweeted your post")
-    return new_id
-
 def reply_to_post(user_id: int, post_id: int, text: str):
     conn = get_conn()
     c = conn.cursor()
@@ -312,40 +257,14 @@ def get_posts_for_user(user_id: int, limit=50) -> List[sqlite3.Row]:
     c.execute("SELECT p.*, u.username, u.display_name, u.profile_pic_path FROM posts p JOIN users u ON p.user_id = u.id WHERE p.user_id = ? ORDER BY p.created_at DESC LIMIT ?", (user_id, limit))
     return c.fetchall()
 
-# --- Fetch Liked Posts ---
 def get_liked_posts_for_user(user_id: int) -> List[sqlite3.Row]:
     c = get_conn().cursor()
-    c.execute("""
-        SELECT p.*, u.username, u.display_name, u.profile_pic_path 
-        FROM posts p 
-        JOIN users u ON p.user_id = u.id 
-        JOIN likes l ON l.post_id = p.id 
-        WHERE l.user_id = ? 
-        ORDER BY l.created_at DESC
-    """, (user_id,))
+    c.execute("""SELECT p.*, u.username, u.display_name, u.profile_pic_path FROM posts p JOIN users u ON p.user_id = u.id JOIN likes l ON l.post_id = p.id WHERE l.user_id = ? ORDER BY l.created_at DESC""", (user_id,))
     return c.fetchall()
 
-# --- Fetch Replies (Full Context) ---
 def get_replies_for_user(user_id: int) -> List[sqlite3.Row]:
     c = get_conn().cursor()
-    c.execute("""
-        SELECT 
-            r.id as reply_id, 
-            r.text as reply_text, 
-            r.created_at as reply_created_at,
-            p.id as orig_post_id,
-            p.text as orig_text, 
-            p.image_path as orig_image, 
-            p.created_at as orig_created,
-            u.username as orig_username, 
-            u.display_name as orig_display, 
-            u.profile_pic_path as orig_pic 
-        FROM replies r 
-        JOIN posts p ON r.post_id = p.id 
-        JOIN users u ON p.user_id = u.id 
-        WHERE r.user_id = ? 
-        ORDER BY r.created_at DESC
-    """, (user_id,))
+    c.execute("""SELECT r.id as reply_id, r.text as reply_text, r.created_at as reply_created_at, p.id as orig_post_id, p.text as orig_text, p.image_path as orig_image, p.created_at as orig_created, u.username as orig_username, u.display_name as orig_display, u.profile_pic_path as orig_pic FROM replies r JOIN posts p ON r.post_id = p.id JOIN users u ON p.user_id = u.id WHERE r.user_id = ? ORDER BY r.created_at DESC""", (user_id,))
     return c.fetchall()
 
 def get_feed(user_id: int, limit=50) -> List[sqlite3.Row]:
@@ -440,63 +359,39 @@ def render_user_list(title: str, users: List[sqlite3.Row]):
                 st.session_state.view = f"profile:{u['username']}"
                 st.rerun()
 
-# --- RENDER POST (NO RETWEET, UNIQUE KEYS, STYLING) ---
-
-# --- RENDER POST (CORRECTED IMAGE SIZING) ---
-# --- RENDER POST (UPDATED) ---
-# --- RENDER POST (WARNING FIXED) ---
-# --- RENDER POST (FORCED FULL WIDTH HTML) ---
 def render_post(p, key_prefix: str = "default"):
-    # Fix: Convert to dict to ensure .get() works
     p = dict(p)
-    
     st.write("\n")
     with st.container(border=True):
         header_cols = st.columns([1, 5, 1])
-        
-        # --- Profile Pic ---
         with header_cols[0]:
             if p.get('profile_pic_path') and os.path.exists(p['profile_pic_path']):
                 st.image(p['profile_pic_path'], width=50)
             else:
                 st.markdown("<div style='font-size: 30px;'>👤</div>", unsafe_allow_html=True)
         
-        # --- Header Text ---
         username = p['username']
         display_name = p['display_name']
         created = human_time(p['created_at'])
         header_cols[1].markdown(f"**@{username}** — *{display_name}* \n<div style='font-size: 0.8em; color: gray;'>{created}</div>", unsafe_allow_html=True)
         
-        # --- View Profile ---
         if header_cols[2].button("View profile", key=f"{key_prefix}_view_profile:{p['id']}"):
             st.session_state.view = f"profile:{username}"
             st.rerun()
             
         st.markdown("---") 
+        if p.get('text'): st.markdown(p['text'])
         
-        # --- Post Text ---
-        if p.get('text'):
-            st.markdown(p['text'])
-        
-        # --- Post Image (NUCLEAR FIX: HTML INJECTION) ---
         if p.get('image_path'):
             abs_path = os.path.abspath(p['image_path'])
             if os.path.exists(abs_path):
-                # Convert to Base64 to force HTML rendering
                 b64_str = get_image_base64(abs_path)
                 if b64_str:
-                    # We inject a raw HTML image tag with width=100% forced style
-                    html = f"""
-                        <div style="width: 100%; margin-top: 10px; border-radius: 12px; overflow: hidden;">
-                            <img src="data:image/png;base64,{b64_str}" 
-                                 style="width: 100%; height: auto; display: block; object-fit: cover; border-radius: 12px;">
-                        </div>
-                    """
+                    html = f"""<div style="width: 100%; margin-top: 10px; border-radius: 12px; overflow: hidden;"><img src="data:image/png;base64,{b64_str}" style="width: 100%; height: auto; display: block; object-fit: cover; border-radius: 12px;"></div>"""
                     st.markdown(html, unsafe_allow_html=True)
                 else:
                     st.error("Error loading image content")
 
-        # --- Action Buttons ---
         st.write("") 
         row = st.columns([1,1,1]) 
         post_id = p['id']
@@ -516,11 +411,9 @@ def render_post(p, key_prefix: str = "default"):
                 if liked: unlike_post(user['id'], post_id)
                 else: like_post(user['id'], post_id)
                 st.rerun()
-            
             if row[1].button("💬 Reply", key=f"{key_prefix}_reply:{post_id}"):
                 st.session_state.view = f"reply:{post_id}"
                 st.rerun()
-            
             if row[2].button(f"{bookmark_icon} Bookmark", key=f"{key_prefix}_bm:{post_id}"):
                 if bookmarked: unbookmark_post(user['id'], post_id)
                 else: bookmark_post(user['id'], post_id)
@@ -530,7 +423,6 @@ def render_post(p, key_prefix: str = "default"):
             row[1].write("💬")
             row[2].write("🔖")
             
-        # --- Replies ---
         if key_prefix != "reply_ctx":
             replies = get_replies_for_post(post_id)
             if replies:
@@ -538,190 +430,81 @@ def render_post(p, key_prefix: str = "default"):
                     for r in replies:
                         st.markdown(f"**@{r['username']}** {human_time(r['created_at'])}")
                         st.write(r['text'])
-# -----------------------
-# Streamlit UI (Application Layer)
-# -----------------------
-# --- REAL-TIME CHAT FRAGMENT ---
-# This decorator causes ONLY this function to rerun every 2 seconds
+
 @st.fragment(run_every=2)
 def render_realtime_chat(current_user_id, other_user_id, current_user_name, other_user_name):
-    # Fetch latest messages
     msgs = get_messages_between(current_user_id, other_user_id)
-    
-    # Create the container
     with st.container(height=300, border=True):
         if not msgs:
             st.caption("No messages yet. Say hi! 👋")
-            
         for m in msgs:
-            # Determine alignment and style
             is_me = (m['sender_id'] == current_user_id)
-            who = "You" if is_me else other_user_name # Use passed name to avoid extra DB lookup
+            who = "You" if is_me else other_user_name
             style = "color: #1d9bf0;" if is_me else "color: #536471;"
             align = "text-align: right;" if is_me else "text-align: left;"
-            
-            # Render exact HTML style as before
-            st.markdown(
-                f"<div style='{align} {style}'>"
-                f"<b>{who}</b> <span style='font-size:0.8em'>({human_time(m['created_at'])})</span>"
-                f"<br>{m['text']}</div>", 
-                unsafe_allow_html=True
-            )
+            st.markdown(f"<div style='{align} {style}'><b>{who}</b> <span style='font-size:0.8em'>({human_time(m['created_at'])})</span><br>{m['text']}</div>", unsafe_allow_html=True)
 
+# ----------------------------------------------------
+# MAIN EXECUTION
+# ----------------------------------------------------
 init_db()
-st.set_page_config(page_title="Mini Twitter (Web3 Integrated)", layout="wide")
+st.set_page_config(page_title="Mini Twitter", layout="wide")
 
-
-# =========================================================
-# CSS THEME (Force Light Mode & Fix Visibility Issues)
-# =========================================================
+# --- CSS (PITCH BLACK + MOBILE FIXES) ---
 st.markdown(
     """
     <style>
-    /* =========================================
-       1. KEEP POST IMAGES BIG
-       ========================================= */
-    .post-img {
-        width: 100% !important;
-        display: block !important;
-        margin-top: 10px !important;
-    }
-    .post-img img {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        object-fit: cover !important;
-        border-radius: 16px !important;
-        border: 1px solid #2f3336 !important;
-    }
-    
-    /* =========================================
-       2. SIDEBAR BUTTONS (TWITTER LOOK)
-       ========================================= */
+    /* 1. IMAGES */
+    .post-img { width: 100% !important; display: block !important; margin-top: 10px !important; }
+    .post-img img { width: 100% !important; max-width: 100% !important; height: auto !important; object-fit: cover !important; border-radius: 16px !important; border: 1px solid #2f3336 !important; }
+    div[data-testid="stColumn"] div[data-testid="stImage"] img { border-radius: 50% !important; aspect-ratio: 1 / 1 !important; object-fit: cover !important; }
+
+    /* 2. THEME COLORS */
+    :root { --primary-color: #1d9bf0; --background-color: #000000; --secondary-background-color: #000000; --text-color: #e7e9ea; }
+    .stApp, section[data-testid="stSidebar"] { background-color: #000000 !important; }
+    section[data-testid="stSidebar"] { border-right: 1px solid #2f3336; }
+    input, textarea, select, div[data-baseweb="select"] > div { background-color: #000000 !important; color: white !important; border: 1px solid #2f3336 !important; }
+
+    /* 3. SIDEBAR BUTTONS */
     section[data-testid="stSidebar"] .stButton > button {
-        background-color: transparent !important;
-        border: none !important;
-        color: #e7e9ea !important;
-        text-align: left !important;
-        font-size: 20px !important; 
-        font-weight: 700 !important;
-        padding: 10px 15px !important;
-        margin-bottom: 4px !important;
-        border-radius: 30px !important;
-        transition: background-color 0.2s ease;
-        filter: grayscale(100%) brightness(200%) contrast(150%);
+        background-color: transparent !important; border: none !important; color: #e7e9ea !important;
+        text-align: left !important; font-size: 20px !important; font-weight: 700 !important;
+        padding: 10px 15px !important; margin-bottom: 4px !important; border-radius: 30px !important;
+        transition: background-color 0.2s ease; filter: grayscale(100%) brightness(200%) contrast(150%);
     }
-    section[data-testid="stSidebar"] .stButton > button:hover {
-        background-color: #181919 !important;
-    }
+    section[data-testid="stSidebar"] .stButton > button:hover { background-color: #181919 !important; }
 
-    /* =========================================
-       3. TWEET BUTTON (BLUE)
-       ========================================= */
-    button[kind="primary"] {
-        background-color: #1d9bf0 !important;
-        border: none !important;
-        color: white !important;
-        font-weight: 800 !important;
-        font-size: 17px !important;
-        border-radius: 30px !important;
-        height: 50px !important;
-        margin-top: 10px !important;
-        box-shadow: 0 5px 15px rgba(29, 155, 240, 0.2) !important;
-        filter: none !important; 
-    }
-    button[kind="primary"]:hover {
-        background-color: #1a8cd8 !important;
-    }
+    /* 4. PRIMARY BUTTONS */
+    button[kind="primary"] { background-color: #1d9bf0 !important; border: none !important; color: white !important; font-weight: 800 !important; font-size: 17px !important; border-radius: 30px !important; height: 50px !important; margin-top: 10px !important; box-shadow: 0 5px 15px rgba(29, 155, 240, 0.2) !important; filter: none !important; }
+    button[kind="primary"]:hover { background-color: #1a8cd8 !important; }
 
-    /* =========================================
-       4. CIRCULAR PROFILE PICS
-       ========================================= */
-    div[data-testid="stColumn"] div[data-testid="stImage"] img {
-        border-radius: 50% !important;
-        aspect-ratio: 1 / 1 !important;
-        object-fit: cover !important;
-    }
-
-    /* =========================================
-       5. PITCH BLACK THEME
-       ========================================= */
-    :root {
-        --primary-color: #1d9bf0;
-        --background-color: #000000;
-        --secondary-background-color: #000000;
-        --text-color: #e7e9ea;
-    }
-    .stApp, section[data-testid="stSidebar"] { 
-        background-color: #000000 !important;
-    }
-    section[data-testid="stSidebar"] {
-        border-right: 1px solid #2f3336;
-    }
-    input, textarea, select, div[data-baseweb="select"] > div {
-        background-color: #000000 !important;
-        color: white !important;
-        border: 1px solid #2f3336 !important;
-    }
+    /* 5. HEADER FIX FOR MOBILE (VISIBLE BUT TRANSPARENT) */
+    header[data-testid="stHeader"] { background: transparent !important; visibility: visible !important; }
+    header[data-testid="stHeader"] > div:first-child { display: none !important; }
+    header[data-testid="stHeader"] button { color: white !important; }
+    header[data-testid="stHeader"] svg { fill: white !important; }
+    .stDeployButton { display: none !important; }
     
-    /* =========================================
-       6. UI CLEANUP (MOBILE FIXED)
-       ========================================= */
+    .block-container { padding-top: 3rem !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] { background-color: #000000 !important; border-color: #2f3336 !important; border-radius: 0px !important; border-bottom: 1px solid #2f3336 !important; border-top: none; border-left: none; border-right: none; }
     
-    /* 1. Make Header Visible but Transparent */
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-        visibility: visible !important; /* Crucial for mobile menu */
-    }
-    
-    /* 2. Hide the Decoration Line & Deploy Button */
-    header[data-testid="stHeader"] > div:first-child {
-        display: none !important;
-    }
-    .stDeployButton {
-        display: none !important;
-    }
-    
-    /* 3. FORCE THE MOBILE MENU ARROW TO BE WHITE */
-    header[data-testid="stHeader"] button {
-        color: white !important;
-    }
-    header[data-testid="stHeader"] svg {
-        fill: white !important;
-    }
-    
-    /* 4. Adjust spacing so content doesn't hide behind the header */
-    .block-container { 
-        padding-top: 3rem !important; 
-    }
-    
-    /* Post Borders */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #000000 !important;
-        border-color: #2f3336 !important;
-        border-radius: 0px !important;
-        border-bottom: 1px solid #2f3336 !important;
-        border-top: none; border-left: none; border-right: none;
+    /* 6. MOBILE LAYOUT */
+    @media only screen and (max-width: 768px) {
+        section[data-testid="stSidebar"] { width: 280px !important; }
+        .block-container { padding-top: 3rem !important; padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
+        button[kind="primary"], div[data-testid="stForm"] button { height: 50px !important; font-size: 18px !important; }
     }
     </style>
     """, unsafe_allow_html=True
 )
 
-# --- COOKIE MANAGER SETUP ---
-# --- COOKIE MANAGER SETUP ---
-# --- COOKIE MANAGER SETUP ---
-# --- COOKIE MANAGER SETUP (CLOUD FIX) ---
-# 1. Cache the manager so it doesn't reload on every run
-# --- COOKIE MANAGER SETUP (CORRECTED) ---
-import time
-
-# 1. Initialize the manager (NO CACHING - fixes the TypeError)
+# --- COOKIE LOGIC (CLOUD FIX: NO CACHE + DELAY) ---
 def get_manager():
-    return stx.CookieManager(key="auth_cookie_manager")
+    return stx.CookieManager(key="auth_manager")
 
 cookie_manager = get_manager()
 
-# 2. FORCE SYNC DELAY (Crucial for Cloud Login Loop)
+# Force Sync Delay for Streamlit Cloud
 if "cookie_sync" not in st.session_state:
     st.session_state.cookie_sync = False
 
@@ -730,41 +513,33 @@ if not st.session_state.cookie_sync:
     st.session_state.cookie_sync = True
     st.rerun()
 
-# 3. Fetch the cookie
 cookie_user_id = cookie_manager.get(cookie="current_user_id")
 
-# 4. INITIALIZE "user" STATE
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 5. AUTO-LOGIN CHECK
-# Only check if user is NOT logged in but a cookie EXISTS
 if not st.session_state.user and cookie_user_id:
     try:
         user_data = get_user_by_id(int(cookie_user_id))
         if user_data:
             st.session_state.user = user_data
-            # Bypass login screen if successful
             if "auth_mode" not in st.session_state:
                 st.session_state.auth_mode = "home"
-    except Exception as e:
-        # If cookie is invalid/old, clear it to prevent loops
-        print(f"Cookie Error: {e}")
+    except:
         cookie_manager.delete("current_user_id")
 
-# ==========================================
-# AUTH SCREEN
-# ==========================================
+# ----------------------------------------------------
+# MAIN APP LOGIC
+# ----------------------------------------------------
+
 if not st.session_state.user:
     if "auth_mode" not in st.session_state:
         st.session_state.auth_mode = "login"
 
     col1, col2, col3 = st.columns([1, 1.2, 1])
-
     with col2:
         st.markdown("<h1 style='text-align: center;'>🐦</h1>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center;'>Sign in to Mini Twitter</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #536471; font-size: 0.9em;'>SocialFi: Integrated SUI Wallet</p>", unsafe_allow_html=True)
         st.write("") 
 
         with st.container(border=True):
@@ -774,12 +549,10 @@ if not st.session_state.user:
                     username = st.text_input("Username", placeholder="@username")
                     password = st.text_input("Password", type="password", placeholder="••••••••")
                     st.write("") 
-                    submitted = st.form_submit_button("Sign In", type="primary", use_container_width=True)
-                    if submitted:
+                    if st.form_submit_button("Sign In", type="primary", use_container_width=True):
                         row = authenticate(username.strip(), password)
                         if row:
                             st.session_state.user = row
-                            # SAVE COOKIE: Expires in 7 days
                             cookie_manager.set("current_user_id", row['id'], expires_at=datetime.now() + timedelta(days=7))
                             st.toast("Welcome back!", icon="👋")
                             time.sleep(0.5)
@@ -797,11 +570,10 @@ if not st.session_state.user:
                     su_user = st.text_input("Choose username", placeholder="e.g., tech_guru")
                     su_name = st.text_input("Display name", placeholder="e.g., Tech Guru")
                     su_pass = st.text_input("Password", type="password")
-                    su_bio = st.text_area("Bio (optional)", placeholder="Tell the world about yourself...")
+                    su_bio = st.text_area("Bio (optional)")
                     su_pic = st.file_uploader("Profile Picture", type=["png","jpg","jpeg"])
                     st.write("")
-                    ok = st.form_submit_button("Sign up & Generate Wallet", type="primary", use_container_width=True)
-                    if ok:
+                    if st.form_submit_button("Sign up & Generate Wallet", type="primary", use_container_width=True):
                         if not su_user or not su_name or not su_pass:
                             st.error("Please fill required fields")
                         else:
@@ -809,11 +581,10 @@ if not st.session_state.user:
                             if su_pic:
                                 fname = f"{su_user}_{int(time.time()*1000)}_{su_pic.name}"
                                 path = os.path.join(PROFILE_PIC_DIR, fname)
-                                with open(path, "wb") as f:
-                                    f.write(su_pic.getbuffer())
+                                with open(path, "wb") as f: f.write(su_pic.getbuffer())
                                 pic_path = path
                             
-                            with st.spinner("Generating Keys on Blockchain..."):
+                            with st.spinner("Generating Keys..."):
                                 new_id = create_user(su_user.strip(), su_name.strip(), su_pass, su_bio.strip(), pic_path)
                             
                             if new_id:
@@ -823,225 +594,127 @@ if not st.session_state.user:
                                 st.rerun()
                             else:
                                 st.error("Username already exists")
-                st.write("")
-                st.markdown("<div style='text-align: center; color: #536471; font-size: 0.8em;'>Have an account already?</div>", unsafe_allow_html=True)
                 if st.button("Back to Login", use_container_width=True):
                     st.session_state.auth_mode = "login"
                     st.rerun()
     st.stop()
 
-# ==========================================
-# MAIN APP - SIDEBAR NAVIGATION
-# ==========================================
-
-# Initialize view state
+# --- LOGGED IN VIEW ---
 if "view" not in st.session_state: st.session_state.view = "home"
 
-# --- SIDEBAR NAVIGATION ---
-# --- SIDEBAR NAVIGATION (TWITTER STYLE) ---
 with st.sidebar:
-    # 1. The X Logo (Centered, correct size)
     st.markdown("<h1 style='text-align: center; color: white; font-size: 45px; margin-top: -20px; margin-bottom: 10px;'>𝕏</h1>", unsafe_allow_html=True)
-    
-    # 2. Buttons - Note the DOUBLE SPACE "  " after the emoji for better separation
-    if st.button("🏠   Home", use_container_width=True): 
-        st.session_state.view = "home"; st.rerun()
-        
-    if st.button("🔍   Explore", use_container_width=True): 
-        st.session_state.view = "explore"; st.rerun()
-        
-    if st.button("🔔   Notifications", use_container_width=True): 
-        st.session_state.view = "notifications"; st.rerun()
-        
-    if st.button("✉️   Messages", use_container_width=True): 
-        st.session_state.view = "messages"; st.rerun()
-        
-    if st.button("🔖   Bookmarks", use_container_width=True): 
-        st.session_state.view = "bookmarks"; st.rerun()
-        
-    if st.button("💳   Wallet", use_container_width=True): 
-        st.session_state.view = "wallet"; st.rerun()
-        
-    if st.button("👤   Profile", use_container_width=True): 
-        st.session_state.view = f"profile:{st.session_state.user['username']}"; st.rerun()
-
-    st.write("") # Spacer
-
-    # 3. Tweet Button (Big Blue)
-    if st.button("Tweet", type="primary", use_container_width=True): 
-        st.session_state.view = "create_post"; st.rerun()
-
+    if st.button("🏠   Home", use_container_width=True): st.session_state.view = "home"; st.rerun()
+    if st.button("🔍   Explore", use_container_width=True): st.session_state.view = "explore"; st.rerun()
+    if st.button("🔔   Notifications", use_container_width=True): st.session_state.view = "notifications"; st.rerun()
+    if st.button("✉️   Messages", use_container_width=True): st.session_state.view = "messages"; st.rerun()
+    if st.button("🔖   Bookmarks", use_container_width=True): st.session_state.view = "bookmarks"; st.rerun()
+    if st.button("💳   Wallet", use_container_width=True): st.session_state.view = "wallet"; st.rerun()
+    if st.button("👤   Profile", use_container_width=True): st.session_state.view = f"profile:{st.session_state.user['username']}"; st.rerun()
+    st.write(""); 
+    if st.button("Tweet", type="primary", use_container_width=True): st.session_state.view = "create_post"; st.rerun()
     st.divider()
-
-    # 4. Profile Pill at Bottom
+    
     usr = st.session_state.user
     if usr:
         usr = get_user_by_id(usr['id']) 
         st.session_state.user = usr
-        
-        # Using a container for better layout control
         with st.container():
             col_p1, col_p2 = st.columns([1, 3])
             with col_p1:
                 if usr.get('profile_pic_path'): st.image(usr['profile_pic_path'], width=40)
                 else: st.write("👤")
             with col_p2:
-                # Tighter line height for the text
                 st.markdown(f"<div style='line-height: 1.1; margin-top: 2px;'><b>{usr.get('display_name')}</b><br><span style='color: gray; font-size: 0.9em;'>@{usr.get('username')}</span></div>", unsafe_allow_html=True)
-
-    # Wallet Address Box (FIXED: Replaced st.code with Custom HTML Div)
-    addr = usr.get("wallet_address", "No Wallet")
-    short_addr = f"{addr[:5]}...{addr[-5:]}"
-    st.markdown(f"""
-        <div style="
-            background-color: #e7f5fd; 
-            color: #1d9bf0; 
-            padding: 8px; 
-            border-radius: 5px; 
-            font-family: monospace; 
-            text-align: center; 
-            font-size: 0.9em;
-            border: 1px solid #1d9bf0;
-            margin-top: 5px;
-        ">
-            {short_addr}
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.write("")
+    
     if st.button("🚪 Sign Out", use_container_width=True):
-        # DELETE COOKIE
         cookie_manager.delete("current_user_id")
         st.session_state.user = None
         st.rerun()
 
-
-# --- VIEWS ---
-
+# --- MAIN CONTENT SWITCHER ---
 if st.session_state.view == "create_post":
     st.header("Create a post")
     with st.form("post_form"):
         text = st.text_area("What's happening?", max_chars=280)
         img = st.file_uploader("Image (optional)", type=["png","jpg","jpeg","gif"])
-        # Form buttons use Primary styling by default in our CSS
-        ok = st.form_submit_button("Post")
-        if ok:
+        if st.form_submit_button("Post"):
             img_path = None
             if img:
                 fname = f"{int(time.time()*1000)}_{img.name}"
                 path = os.path.join(POST_IMAGE_DIR, fname)
-                with open(path, "wb") as f:
-                    f.write(img.getbuffer())
+                with open(path, "wb") as f: f.write(img.getbuffer())
                 img_path = path
             create_post(st.session_state.user['id'], text, img_path)
-            st.success("Posted")
-            st.session_state.view = "home"
-            st.rerun()
+            st.success("Posted"); st.session_state.view = "home"; st.rerun()
 
 elif st.session_state.view.startswith("reply:"):
     _, pid = st.session_state.view.split(":")
-    pid = int(pid)
-    p = get_post(pid)
+    p = get_post(int(pid))
     if not p: st.error("Post not found")
     else:
         render_post(p, "reply_view")
         with st.form("reply_form"):
             txt = st.text_area("Reply", max_chars=280)
-            ok = st.form_submit_button("Reply")
-            if ok:
-                reply_to_post(st.session_state.user['id'], pid, txt)
-                st.success("Replied")
-                st.session_state.view = "home"
-                st.rerun()
+            if st.form_submit_button("Reply"):
+                reply_to_post(st.session_state.user['id'], int(pid), txt)
+                st.success("Replied"); st.session_state.view = "home"; st.rerun()
 
 elif st.session_state.view == "edit_profile":
     st.header("Edit Profile")
     curr = st.session_state.user
-    
     with st.container(border=True):
         with st.form("edit_profile_form"):
-            # Display Name
             new_name = st.text_input("Display Name", value=curr['display_name'])
-            
-            # Bio
-            new_bio = st.text_area("Bio", value=curr['bio'] if curr['bio'] else "", max_chars=160)
-            
-            # Profile Picture
+            new_bio = st.text_area("Bio", value=curr['bio'] if curr['bio'] else "")
             st.write("Profile Picture")
-            col_preview, col_upload = st.columns([1, 3])
-            
-            with col_preview:
-                # Show current pic preview
-                if curr.get('profile_pic_path') and os.path.exists(curr['profile_pic_path']):
-                    st.image(curr['profile_pic_path'], width=80)
-                else:
-                    st.markdown("👤")
-            
-            with col_upload:
-                new_pic = st.file_uploader("Upload new image", type=["png", "jpg", "jpeg"])
-
+            col_pr, col_up = st.columns([1, 3])
+            with col_pr:
+                if curr.get('profile_pic_path') and os.path.exists(curr['profile_pic_path']): st.image(curr['profile_pic_path'], width=80)
+                else: st.markdown("👤")
+            with col_up:
+                new_pic = st.file_uploader("Upload", type=["png", "jpg", "jpeg"])
             st.write("")
-            submitted = st.form_submit_button("Save Changes", type="primary")
-
-            if submitted:
-                if not new_name.strip():
-                    st.error("Display Name cannot be empty")
+            if st.form_submit_button("Save Changes", type="primary"):
+                if not new_name.strip(): st.error("Name required")
                 else:
                     final_path = None
-                    # Handle Image Upload
                     if new_pic:
                         fname = f"updated_{curr['id']}_{int(time.time())}_{new_pic.name}"
                         path = os.path.join(PROFILE_PIC_DIR, fname)
-                        with open(path, "wb") as f:
-                            f.write(new_pic.getbuffer())
+                        with open(path, "wb") as f: f.write(new_pic.getbuffer())
                         final_path = path
-                    
-                    # Update Database
                     updated_user = update_user_details(curr['id'], new_name.strip(), new_bio.strip(), final_path)
-                    
-                    # Update Session State
                     st.session_state.user = updated_user
-                    
-                    st.success("Profile updated successfully!")
-                    time.sleep(1)
-                    # Redirect back to profile
-                    st.session_state.view = f"profile:{curr['username']}"
-                    st.rerun()
-
-    if st.button("Cancel"):
-        st.session_state.view = f"profile:{curr['username']}"
-        st.rerun()
+                    st.success("Updated!"); time.sleep(1); st.session_state.view = f"profile:{curr['username']}"; st.rerun()
+    if st.button("Cancel"): st.session_state.view = f"profile:{curr['username']}"; st.rerun()
 
 elif st.session_state.view == "home":
     st.header("Home")
     posts = get_feed(st.session_state.user['id'], limit=100)
-    if not posts: st.info("Your timeline is empty. Go to 'Explore' to find people to follow!")
+    if not posts: st.info("Timeline empty. Check Explore!")
     for p in posts: render_post(p, "home")
 
 elif st.session_state.view == "explore":
     st.header("Explore")
-    term = st.text_input("Search users or posts", placeholder="Try searching for a username or topic...")
+    term = st.text_input("Search")
     if term:
         st.subheader("Users")
         for u in search_users(term):
             st.write(f"@{u['username']} — {u['display_name']}")
-            if st.button("View", key=f"viewu:{u['id']}"):
-                st.session_state.view = f"profile:{u['username']}"
-                st.rerun()
+            if st.button("View", key=f"viewu:{u['id']}"): st.session_state.view = f"profile:{u['username']}"; st.rerun()
         st.subheader("Posts")
-        for p in search_posts(term):
-            render_post(p, "explore")
+        for p in search_posts(term): render_post(p, "explore")
     else:
         st.subheader("Public posts (recent)")
         c = get_conn().cursor()
         c.execute("SELECT p.*, u.username, u.display_name, u.profile_pic_path FROM posts p JOIN users u ON p.user_id = u.id ORDER BY p.created_at DESC LIMIT 100")
-        for p in c.fetchall():
-            render_post(p, "explore")
+        for p in c.fetchall(): render_post(p, "explore")
 
 elif st.session_state.view == "bookmarks":
     st.header("Bookmarks")
     bookmarks = get_bookmarks_for_user(st.session_state.user['id'])
-    if not bookmarks: st.info("No bookmarks yet.")
+    if not bookmarks: st.info("No bookmarks.")
     for p in bookmarks: render_post(p, "bookmarks")
 
 elif st.session_state.view == "notifications":
@@ -1054,263 +727,112 @@ elif st.session_state.view == "notifications":
 elif st.session_state.view == "messages":
     st.header("Direct Messages")
     user = st.session_state.user
-    
-    # 1. Select User Logic
     rows = get_conn().cursor().execute("SELECT username FROM users WHERE id != ?", (user['id'],)).fetchall()
     options = [r['username'] for r in rows]
-    other = st.selectbox("Select user to message", options=options)
-    
+    other = st.selectbox("Select user", options=options)
     if other:
         other_row = get_user_by_username(other)
         st.subheader(f"Chat with @{other_row['username']}")
-        
-        # 2. CALL THE REAL-TIME FRAGMENT
-        # This function will now self-refresh every 2 seconds independently of the rest of the page
         render_realtime_chat(user['id'], other_row['id'], user['username'], other_row['username'])
-        
-        # 3. Input Form (Outside the fragment so typing isn't interrupted)
         with st.form("send_msg", clear_on_submit=True):
             txt = st.text_area("Message")
-            ok = st.form_submit_button("Send")
-            if ok and txt.strip():
+            if st.form_submit_button("Send") and txt.strip():
                 send_message(user['id'], other_row['id'], txt)
-                # No need to rerun everything, the fragment will pick it up in <2 seconds
-                st.toast("Message sent!")
-# --- WALLET VIEW (REDESIGNED) ---
+                st.toast("Sent!")
 
-# --- WALLET VIEW (REAL-TIME DATA) ---
-
-# --- WALLET VIEW (CLEANER HEADER) ---
 elif st.session_state.view == "wallet":
     curr = st.session_state.user
-    
-    # 1. Fetch Balance & Market Data
-    with st.spinner("Syncing with Blockchain..."):
+    with st.spinner("Syncing..."):
         balance = get_sui_balance(curr['wallet_address'])
         sui_price, price_change_pct = get_sui_market_data()
-
-    # Calculate Holdings
-    holdings_value = balance * sui_price
-
-    # Determine Colors
-    change_color = "#00ba7c" if price_change_pct >= 0 else "#f91880"
-    change_sign = "+" if price_change_pct >= 0 else ""
-
-    # --- HEADER (REMOVED SEARCH ICON) ---
-    # Just the title now, no columns needed
+    holdings = balance * sui_price
+    color = "#00ba7c" if price_change_pct >= 0 else "#f91880"
+    sign = "+" if price_change_pct >= 0 else ""
     st.markdown("<h1 style='margin-bottom: 20px;'>Your Coins</h1>", unsafe_allow_html=True)
-
-    # --- WALLET CARD ---
-    st.markdown(f"""
-    <div style="background-color: #000000; border-radius: 20px; border: 1px solid #2f3336; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); margin-bottom: 30px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <img src="https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png" width="48" height="48" style="border-radius: 50%;">
-                <div>
-                    <div style="font-weight: 800; font-size: 19px; color: #e7e9ea; display: flex; align-items: center; gap: 4px;">
-                        Sui 
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e4/Twitter_Verified_Badge.svg" width="18" height="18">
-                    </div>
-                    <div style="font-size: 15px; color: #71767b; margin-top: 2px;">
-                        ${sui_price:,.2f} <span style="color: {change_color}; font-weight: 500;">{change_sign}{price_change_pct:.2f}%</span>
-                    </div>
-                </div>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-weight: 800; font-size: 19px; color: #e7e9ea;">${holdings_value:,.2f}</div>
-                <div style="font-size: 15px; color: #71767b; margin-top: 2px;">{balance:.4f} SUI</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 2. Withdraw / Send Section
+    st.markdown(f"""<div style="background-color: #000000; border-radius: 20px; border: 1px solid #2f3336; padding: 20px; margin-bottom: 30px;"><div style="display: flex; justify-content: space-between; align-items: center;"><div style="display: flex; align-items: center; gap: 15px;"><img src="https://s2.coinmarketcap.com/static/img/coins/64x64/20947.png" width="48" height="48" style="border-radius: 50%;"><div><div style="font-weight: 800; font-size: 19px; color: #e7e9ea;">Sui</div><div style="font-size: 15px; color: #71767b; margin-top: 2px;">${sui_price:,.2f} <span style="color: {color};">{sign}{price_change_pct:.2f}%</span></div></div></div><div style="text-align: right;"><div style="font-weight: 800; font-size: 19px; color: #e7e9ea;">${holdings:,.2f}</div><div style="font-size: 15px; color: #71767b; margin-top: 2px;">{balance:.4f} SUI</div></div></div></div>""", unsafe_allow_html=True)
     st.subheader("📤 Withdraw Funds")
-    st.write("Send SUI to an external address.")
     with st.form("withdraw_form"):
-        dest_addr = st.text_input("Destination Address (0x...)")
-        amount = st.number_input("Amount to Send", min_value=0.0, max_value=balance, step=0.1)
-        
-        if st.form_submit_button("Send Transaction", width="stretch"):
-            if amount <= 0:
-                st.error("Amount must be positive.")
-            elif not dest_addr.startswith("0x"):
-                st.error("Invalid SUI address.")
+        dest = st.text_input("Address (0x...)")
+        amt = st.number_input("Amount", min_value=0.0, max_value=balance, step=0.1)
+        if st.form_submit_button("Send", width="stretch"):
+            if amt <= 0 or not dest.startswith("0x"): st.error("Invalid input")
             else:
-                with st.spinner("Processing on Blockchain..."):
-                    success, msg = send_sui_payment(curr['private_key'], dest_addr, amount)
-                    if success:
-                        st.success(f"Transaction Sent! Digest: {msg}")
-                        st.balloons()
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(f"Failed: {msg}")
+                with st.spinner("Sending..."):
+                    s, m = send_sui_payment(curr['private_key'], dest, amt)
+                    if s: st.success(f"Sent! {m}"); time.sleep(2); st.rerun()
+                    else: st.error(m)
     st.divider()
-    with st.expander("🔐 View Private Keys (Security Risk!)"):
-        st.warning("These are your keys. Never share them.")
-        st.text_input("Private Key", curr['private_key'], type="password", disabled=True)
-        st.text_area("Mnemonic Phrase", curr['mnemonic'], disabled=True)
+    with st.expander("🔐 Keys"):
+        st.text_input("Private Key", curr['private_key'], disabled=True)
+        st.text_area("Mnemonic", curr['mnemonic'], disabled=True)
 
-# --- PROFILE VIEW (TWITTER STYLE REDESIGN) ---
 elif st.session_state.view.startswith("profile:"):
     _, uname = st.session_state.view.split(":")
     u_row = get_user_by_username(uname)
-    
-    if not u_row:
-        st.error("User not found")
+    if not u_row: st.error("User not found")
     else:
         u = dict(u_row)
-        user_id = u['id']
-        is_me = (st.session_state.user['id'] == user_id)
-
-        # 1. THE BANNER AREA
-        # FIX: Changed background-color to 'transparent' so the grey box is GONE.
-        # It only takes up space layout-wise so the profile pic sits correctly.
-        st.markdown(
-            """
-            <div style="
-                background-color: transparent; 
-                height: 120px; 
-                width: 100%; 
-                margin-bottom: -60px;
-            "></div>
-            """, 
-            unsafe_allow_html=True
-        )
-
-        # 2. HEADER AREA (Profile Pic + Action Buttons)
-        header_cols = st.columns([1, 2, 1])
-        
-        with header_cols[0]:
-            # Profile Picture Container
+        uid = u['id']
+        is_me = (st.session_state.user['id'] == uid)
+        st.markdown("""<div style="background-color: transparent; height: 120px; width: 100%; margin-bottom: -60px;"></div>""", unsafe_allow_html=True)
+        hc = st.columns([1, 2, 1])
+        with hc[0]:
             st.markdown('<div class="profile-pic">', unsafe_allow_html=True)
-            if u.get('profile_pic_path'): 
-                if os.path.exists(u['profile_pic_path']):
-                    st.image(u['profile_pic_path'], width=130)
-                else:
-                    st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=130)
-            else:
-                 st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=130)
+            if u.get('profile_pic_path') and os.path.exists(u['profile_pic_path']): st.image(u['profile_pic_path'], width=130)
+            else: st.image("https://cdn-icons-png.flaticon.com/512/149/149071.png", width=130)
             st.markdown('</div>', unsafe_allow_html=True)
-
-        with header_cols[2]:
-            st.write("") 
-            st.write("") 
+        with hc[2]:
+            st.write(""); st.write("")
             if not is_me:
-                btn_cols = st.columns([1, 1])
-                with btn_cols[0]:
+                bc = st.columns([1, 1])
+                with bc[0]:
                     with st.popover("💸 Send SUI"):
-                        st.write(f"Tip @{u['username']}")
-                        tip_val = st.number_input("SUI", 0.1, step=0.1, key=f"tip_{user_id}")
-                        if st.button("Send", key=f"pay_{user_id}"):
-                            with st.spinner("..."):
-                                s, m = send_sui_payment(st.session_state.user['private_key'], u['wallet_address'], tip_val)
-                                if s: st.success("Sent!"); create_notification(user_id, f"Tip from @{st.session_state.user['username']}")
-                                else: st.error(m)
-                with btn_cols[1]:
-                    if is_following(st.session_state.user['id'], user_id):
-                        if st.button("Unfollow", key=f"unfol_{user_id}"):
-                            unfollow_user(st.session_state.user['id'], user_id)
-                            st.rerun()
+                        tip = st.number_input("SUI", 0.1, key=f"t{uid}")
+                        if st.button("Send", key=f"p{uid}"):
+                            s, m = send_sui_payment(st.session_state.user['private_key'], u['wallet_address'], tip)
+                            if s: st.success("Sent!"); create_notification(uid, f"Tip from @{st.session_state.user['username']}")
+                            else: st.error(m)
+                with bc[1]:
+                    if is_following(st.session_state.user['id'], uid):
+                        if st.button("Unfollow", key=f"uf{uid}"): unfollow_user(st.session_state.user['id'], uid); st.rerun()
                     else:
-                        if st.button("Follow", type="primary", key=f"fol_{user_id}"):
-                            follow_user(st.session_state.user['id'], user_id)
-                            st.rerun()
+                        if st.button("Follow", type="primary", key=f"f{uid}"): follow_user(st.session_state.user['id'], uid); st.rerun()
             else:
-                # Edit Profile Button
-                if st.button("Edit Profile", key="edit_profile_btn"):
-                    st.session_state.view = "edit_profile"
-                    st.rerun()
-
-        # 3. USER INFO
-        st.markdown(f"""
-        <div style="margin-top: 10px;">
-            <div style="font-size: 1.5rem; font-weight: 800; line-height: 1.2; color: white;">{u['display_name']}</div>
-            <div style="color: #71767b; font-size: 1rem;">@{u['username']}</div>
-        </div>
-        """, unsafe_allow_html=True)
+                if st.button("Edit Profile"): st.session_state.view = "edit_profile"; st.rerun()
         
-        if u.get('bio'):
-            st.markdown(f"<div style='margin-top: 10px; font-size: 1rem; color: #e7e9ea;'>{u['bio']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='margin-top: 10px;'><div style='font-size: 1.5rem; font-weight: 800; color: white;'>{u['display_name']}</div><div style='color: #71767b;'>@{u['username']}</div></div>", unsafe_allow_html=True)
+        if u.get('bio'): st.markdown(f"<div style='margin-top: 10px; color: #e7e9ea;'>{u['bio']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='color: #71767b; margin-top: 10px;'>📅 Joined {human_time(u.get('created_at')).split(' ')[0]}</div>", unsafe_allow_html=True)
+        
+        sc = st.columns([1, 1, 4])
+        with sc[0]:
+            if st.button(f"{get_following_count(uid)} Following", key=f"ing{uid}"): st.session_state.view = f"following_list:{uid}:{uname}"; st.rerun()
+        with sc[1]:
+            if st.button(f"{get_follower_count(uid)} Followers", key=f"ers{uid}"): st.session_state.view = f"followers_list:{uid}:{uname}"; st.rerun()
             
-        st.markdown(f"""
-        <div style="color: #71767b; font-size: 0.9rem; margin-top: 10px; display: flex; align-items: center;">
-            📅 Joined {human_time(u.get('created_at')).split(' ')[0]}
-        </div>
-        """, unsafe_allow_html=True)
-
-        # 4. STATS ROW
-        following_count = get_following_count(user_id)
-        follower_count = get_follower_count(user_id)
-        
-        st.write("")
-        stat_cols = st.columns([1, 1, 4])
-        
-        with stat_cols[0]:
-            label = f"{following_count} Following"
-            if st.button(label, key=f"ing_{user_id}"):
-                st.session_state.view = f"following_list:{user_id}:{uname}"
-                st.rerun()
-                
-        with stat_cols[1]:
-            label = f"{follower_count} Followers"
-            if st.button(label, key=f"ers_{user_id}"):
-                st.session_state.view = f"followers_list:{user_id}:{uname}"
-                st.rerun()
-
-        # 5. TABS
-        st.write("")
-        st.write("")
-        tab_posts, tab_replies, tab_likes = st.tabs(["Posts", "Replies", "Likes"])
-        
-        with tab_posts:
-            user_posts = get_posts_for_user(user_id, limit=100)
-            if not user_posts: st.info("No posts yet.")
-            for p in user_posts: render_post(p, "prof_posts")
-            
-        with tab_replies:
-            replies_list = get_replies_for_user(user_id)
-            if not replies_list: st.info("No replies yet.")
-            for r in replies_list:
+        st.write(""); st.write("")
+        t1, t2, t3 = st.tabs(["Posts", "Replies", "Likes"])
+        with t1:
+            for p in get_posts_for_user(uid, 100): render_post(p, "pp")
+        with t2:
+            for r in get_replies_for_user(uid):
                 with st.container(border=True):
-                    col_icon, col_txt = st.columns([1, 20])
-                    with col_icon: st.write("💬")
-                    with col_txt:
-                        st.caption(f"Replying to @{r['orig_username']}")
-                        st.markdown(f"**{r['reply_text']}**")
-                        with st.expander("Original Post Context"):
-                            fake_post_row = {
-                                "id": r["orig_post_id"],
-                                "username": r["orig_username"],
-                                "display_name": r["orig_display"],
-                                "profile_pic_path": r["orig_pic"],
-                                "text": r["orig_text"],
-                                "image_path": r["orig_image"],
-                                "created_at": r["orig_created"]
-                            }
-                            render_post(fake_post_row, key_prefix=f"reply_ctx_{r['reply_id']}")
-
-        with tab_likes:
-             liked_posts = get_liked_posts_for_user(user_id)
-             if not liked_posts: st.info("No liked posts yet.")
-             for p in liked_posts: render_post(p, "prof_likes")
+                    st.caption(f"Replying to @{r['orig_username']}")
+                    st.markdown(f"**{r['reply_text']}**")
+                    with st.expander("Original Post"):
+                        render_post({"id": r["orig_post_id"], "username": r["orig_username"], "display_name": r["orig_display"], "profile_pic_path": r["orig_pic"], "text": r["orig_text"], "image_path": r["orig_image"], "created_at": r["orig_created"]}, key_prefix=f"rc{r['reply_id']}")
+        with t3:
+            for p in get_liked_posts_for_user(uid): render_post(p, "pl")
 
 elif st.session_state.view.startswith("following_list:"):
-    _, user_id_str, uname = st.session_state.view.split(":")
-    user_id = int(user_id_str)
-    users_list = get_following_list(user_id)
-    render_user_list(f"@{uname} is Following ({len(users_list)})", users_list)
-    if st.button("← Back to Profile"): st.session_state.view = f"profile:{uname}"; st.rerun()
+    _, uid, unm = st.session_state.view.split(":")
+    render_user_list(f"@{unm} Following", get_following_list(int(uid)))
+    if st.button("← Back"): st.session_state.view = f"profile:{unm}"; st.rerun()
 
 elif st.session_state.view.startswith("followers_list:"):
-    _, user_id_str, uname = st.session_state.view.split(":")
-    user_id = int(user_id_str)
-    users_list = get_followers_list(user_id)
-    render_user_list(f"Followers of @{uname} ({len(users_list)})", users_list)
-    if st.button("← Back to Profile"): st.session_state.view = f"profile:{uname}"; st.rerun()
+    _, uid, unm = st.session_state.view.split(":")
+    render_user_list(f"@{unm} Followers", get_followers_list(int(uid)))
+    if st.button("← Back"): st.session_state.view = f"profile:{unm}"; st.rerun()
 
-else: st.write("Unknown view")
-
-st.markdown("---")
-st.caption("Mini Twitter Clone (Web3 Enabled)")
+else: st.write("404")
+st.markdown("---"); st.caption("Mini Twitter Clone")
