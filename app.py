@@ -579,28 +579,24 @@ st.markdown(
     """
     <style>
     /* =========================================
-       1. PITCH BLACK THEME (OLED STYLE)
+       1. KEEP POST IMAGES BIG
        ========================================= */
-    :root {
-        --primary-color: #1d9bf0;
-        --background-color: #000000;
-        --secondary-background-color: #000000; /* Sidebar is now Pitch Black too */
-        --text-color: #e7e9ea;
-        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    .post-img {
+        width: 100% !important;
+        display: block !important;
+        margin-top: 10px !important;
     }
-    
-    /* Force App & Sidebar to be Pure Black */
-    .stApp, section[data-testid="stSidebar"] { 
-        background-color: #000000 !important;
-    }
-    
-    /* Remove the default Sidebar border to match Twitter's clean look */
-    section[data-testid="stSidebar"] {
-        border-right: 1px solid #2f3336; /* Subtle border only */
+    .post-img img {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        object-fit: cover !important;
+        border-radius: 16px !important;
+        border: 1px solid #2f3336 !important;
     }
     
     /* =========================================
-       2. SIDEBAR BUTTONS (SHARP & CLEAN)
+       2. SIDEBAR BUTTONS (TWITTER LOOK)
        ========================================= */
     section[data-testid="stSidebar"] .stButton > button {
         background-color: transparent !important;
@@ -609,22 +605,18 @@ st.markdown(
         text-align: left !important;
         font-size: 20px !important; 
         font-weight: 700 !important;
-        letter-spacing: 0.5px !important;
         padding: 10px 15px !important;
         margin-bottom: 4px !important;
         border-radius: 30px !important;
         transition: background-color 0.2s ease;
-        
-        /* Make icons sharp white */
         filter: grayscale(100%) brightness(200%) contrast(150%);
     }
-
     section[data-testid="stSidebar"] .stButton > button:hover {
-        background-color: #181919 !important; /* Very dark grey hover */
+        background-color: #181919 !important;
     }
 
     /* =========================================
-       3. TWEET BUTTON (BIG BLUE PILL)
+       3. TWEET BUTTON (BLUE)
        ========================================= */
     button[kind="primary"] {
         background-color: #1d9bf0 !important;
@@ -643,24 +635,7 @@ st.markdown(
     }
 
     /* =========================================
-       4. POST IMAGES (FULL WIDTH & ROUNDED)
-       ========================================= */
-    .post-img {
-        width: 100% !important;
-        display: block !important;
-        margin-top: 10px !important;
-    }
-    .post-img img {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        object-fit: cover !important;
-        border-radius: 16px !important;
-        border: 1px solid #2f3336 !important;
-    }
-    
-    /* =========================================
-       5. CIRCULAR PROFILE PICTURES
+       4. CIRCULAR PROFILE PICS
        ========================================= */
     div[data-testid="stColumn"] div[data-testid="stImage"] img {
         border-radius: 50% !important;
@@ -669,68 +644,59 @@ st.markdown(
     }
 
     /* =========================================
-       6. UI CLEANUP & BORDERS
+       5. PITCH BLACK THEME
        ========================================= */
-    /* Hide Header */
-    header[data-testid="stHeader"] { visibility: hidden !important; }
-    .block-container { padding-top: 1rem !important; }
-    
-    /* Make Input Boxes Pitch Black to match background */
+    :root {
+        --primary-color: #1d9bf0;
+        --background-color: #000000;
+        --secondary-background-color: #000000;
+        --text-color: #e7e9ea;
+    }
+    .stApp, section[data-testid="stSidebar"] { 
+        background-color: #000000 !important;
+    }
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid #2f3336;
+    }
     input, textarea, select, div[data-baseweb="select"] > div {
         background-color: #000000 !important;
         color: white !important;
         border: 1px solid #2f3336 !important;
     }
     
-    /* Post Borders - Twitter uses a very specific dark grey */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #000000 !important; /* Ensure card background is black */
-        border-color: #2f3336 !important;
-        border-radius: 0px !important; /* Twitter posts are usually squarer, but 0 or 16 is fine */
-        border-left: none !important;
-        border-right: none !important;
-        border-top: none !important;
-        border-bottom: 1px solid #2f3336 !important; /* Only bottom border like real feed */
-    }
     /* =========================================
-       8. MOBILE RESPONSIVENESS (Phone View)
+       6. UI CLEANUP (FIXED FOR MOBILE)
        ========================================= */
-    @media only screen and (max-width: 768px) {
-        
-        /* 1. Reduce Sidebar padding to save space */
-        section[data-testid="stSidebar"] {
-            width: 280px !important;
-        }
-        
-        /* 2. Reduce empty white space around the main content */
-        .block-container {
-            padding-top: 3rem !important; /* Less gap at the top */
-            padding-left: 1rem !important; /* Full width feel */
-            padding-right: 1rem !important;
-        }
-        
-        /* 3. Make Buttons "Thumb-Friendly" (Taller & Bigger Text) */
-        button[kind="primary"], 
-        div[data-testid="stForm"] button {
-            height: 55px !important; /* Easier to tap */
-            font-size: 20px !important;
-        }
-        
-        /* 4. Force Profile Header to Stack Vertically (No squished columns) */
-        div[data-testid="stHorizontalBlock"] {
-            flex-wrap: wrap !important;
-        }
-        
-        /* 5. Fix the Wallet Card layout for small screens */
-        .wallet-card-container > div {
-            flex-direction: column !important; /* Stack items vertically */
-            align-items: flex-start !important;
-            gap: 10px !important;
-        }
-        
-        /* 6. Adjust Text Sizes for readability */
-        h1 { font-size: 28px !important; }
-        p, div, li { font-size: 16px !important; }
+    
+    /* Hide the header decoration (the colorful line and "Deploy" button) */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+    }
+    
+    /* Hide the decoration line specifically */
+    header[data-testid="stHeader"] > div:first-child {
+        display: none !important;
+    }
+    
+    /* CRITICAL FIX: Make the Mobile Sidebar Button (Arrow/Hamburger) Visible and White */
+    button[kind="header"] {
+        background-color: transparent !important;
+        color: white !important; /* Force it white so you can see it on black background */
+        font-size: 20px !important;
+    }
+    
+    /* Move content up */
+    .block-container { 
+        padding-top: 1rem !important; 
+    }
+    
+    /* Post Borders */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #000000 !important;
+        border-color: #2f3336 !important;
+        border-radius: 0px !important;
+        border-bottom: 1px solid #2f3336 !important;
+        border-top: none; border-left: none; border-right: none;
     }
     </style>
     """, unsafe_allow_html=True
